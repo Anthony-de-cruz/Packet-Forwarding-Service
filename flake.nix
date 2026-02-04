@@ -1,5 +1,5 @@
 {
-  description = "nix flake for installing and linking with libnetfilter_queue.";
+  description = "nix flake for installing and linking with libnetfilter_queue and openssl.";
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -18,11 +18,12 @@
           buildInputs = with pkgs; [
             rust-bin.stable.latest.default
             libnetfilter_queue
+            openssl
             pkg-config
           ];
           shellHook = ''
-            export PKG_CONFIG_PATH="${pkgs.libnetfilter_queue}/lib/pkgconfig"
-            export LD_LIBRARY_PATH="${pkgs.libnetfilter_queue}/lib:$LD_LIBRARY_PATH"
+            export PKG_CONFIG_PATH="${pkgs.libnetfilter_queue}/lib/pkgconfig:${pkgs.openssl}/lib/pkgconfig"
+            export LD_LIBRARY_PATH="${pkgs.libnetfilter_queue}/lib:${pkgs.openssl}/lib:$LD_LIBRARY_PATH"
           '';
         };
       }
