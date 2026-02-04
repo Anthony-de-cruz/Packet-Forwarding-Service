@@ -1,16 +1,14 @@
 use nfq::{Queue, Verdict};
 
 pub fn redirect() -> std::io::Result<()> {
-    println!("opening queue...");
+    println!("Opening net filter queue...");
     let mut queue = Queue::open()?;
-    println!("queue opened?");
+    println!("Binding net filter queue to interface...");
     queue.bind(0)?;
-    println!("bind complete?");
     let mut i = 0;
     loop {
-        println!("awaiting msg");
         let mut msg = queue.recv()?;
-        println!("woaah");
+        println!("RX:");
         if let Some(gid) = msg.get_gid() {
             println!("    gid: {} ", gid);
         }
@@ -27,9 +25,11 @@ pub fn redirect() -> std::io::Result<()> {
             msg.set_verdict(Verdict::Accept);
         }
 
-        i += 1;
         queue.verdict(msg)?;
+        if i > 100 {
+            break;
+        }
+        i += 1;
     }
-    //Ok(())
+    Ok(())
 }
-
