@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-This project is dependent on the [libnetfilter_queue] library and the corresponding Rust binding [nfq](https://github.com/nbdd0121/nfq-rs).
+This project is dependent on the [libnetfilter_queue](https://netfilter.org/projects/libnetfilter_queue/index.html) library and the corresponding Rust binding [nfq](https://github.com/nbdd0121/nfq-rs).
 
 - On Debian based Linux: install `libnetfilter-queue-dev`.
 - On Fedora Linux: install `libnetfilter_queue`.
