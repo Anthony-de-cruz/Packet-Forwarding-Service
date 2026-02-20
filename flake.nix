@@ -18,6 +18,7 @@
           buildInputs = with pkgs; [
             rust-bin.stable.latest.default
             libnetfilter_queue
+            openssl
             pkg-config
           ];
           shellHook = ''
