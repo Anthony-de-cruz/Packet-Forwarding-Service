@@ -4,47 +4,48 @@ mod server;
 use std::fs;
 
 use classification::model::{TrafficType, classify_image};
+use server::server::redirect;
 
 use ort::session::{Session, builder::GraphOptimizationLevel};
 
-use crate::server::server::redirect;
-
-const MODEL_PATH: &str = "model/model.onnx";
+const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
 
 fn main() {
     // Initialize ONNX Runtime
-    println!("Loading ONNX model @ {}...", MODEL_PATH);
-    let mut session = Session::builder()
-        .unwrap()
-        .with_optimization_level(GraphOptimizationLevel::All)
-        .unwrap()
-        .commit_from_file(MODEL_PATH)
-        .unwrap();
-    println!("Model loaded successfully!");
-
-    for path in fs::read_dir("data").unwrap() {
-        let full_path = format!("{}", path.unwrap().path().display()).to_string();
-        println!("\nImage: {}", full_path);
-        match classify_image(&mut session, &full_path) {
-            Ok((predicted_class, scores)) => {
-                //println!("\nImage: {}", image_path);
-                println!("Predicted class: {}", predicted_class);
-                println!("Confidence scores:");
-                for (i, score) in scores.iter().enumerate() {
-                    println!(
-                        "  Class {}: {:.4}",
-                        TrafficType::try_from(i).unwrap(),
-                        score
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-            }
-        }
-    }
+    // println!("Loading ONNX model @ {}...", MODEL_PATH);
+    // let mut session = Session::builder()
+    //     .unwrap()
+    //     .with_optimization_level(GraphOptimizationLevel::All)
+    //     .unwrap()
+    //     .commit_from_file(MODEL_PATH)
+    //     .unwrap();
+    // println!("Model loaded successfully!");
+    //
+    // for path in fs::read_dir("data").unwrap() {
+    //     let full_path = format!("{}", path.unwrap().path().display()).to_string();
+    //     println!("\nImage: {}", full_path);
+    //     match classify_image(&mut session, &full_path) {
+    //         Ok((predicted_class, scores)) => {
+    //             //println!("\nImage: {}", image_path);
+    //             println!("Predicted class: {}", predicted_class);
+    //             println!("Confidence scores:");
+    //             for (i, score) in scores.iter().enumerate() {
+    //                 println!(
+    //                     "  Class {}: {:.4}",
+    //                     TrafficType::try_from(i).unwrap(),
+    //                     score
+    //                 );
+    //             }
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Error: {}", e);
+    //         }
+    //     }
+    // }
+    redirect().unwrap();
 }
-//
+
+
 // fn main() {
 //     println!("Start");
 //     redirect().unwrap();

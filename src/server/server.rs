@@ -1,11 +1,17 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use nfq::{Queue, Verdict};
 
 pub fn redirect() -> std::io::Result<()> {
     println!("Opening net filter queue...");
     let mut queue = Queue::open()?;
     println!("Binding net filter queue to interface...");
-    queue.bind(0)?;
+    //let mut hashes = HashMap::new();
+    queue.bind(10)?;
+    println!("Net filter queue binding complete.");
     let mut i = 0;
+    let mut hasher = DefaultHasher::new();
     loop {
         let mut msg = queue.recv()?;
         println!("RX:");
@@ -17,19 +23,18 @@ pub fn redirect() -> std::io::Result<()> {
         }
         println!("  packet id: {}", msg.get_packet_id());
 
-        println!(" payload: {:?}", msg.get_payload());
+        msg.get_payload().hash(&mut hasher);
+        println!("  payload hash: {:#X}", hasher.finish());
 
-        if i % 2 == 1 {
-            msg.set_verdict(Verdict::Stop);
-        } else {
-            msg.set_verdict(Verdict::Accept);
-        }
+        // Reroute to new place.
+        msg.set_nfmark(0x801);
+        msg.set_verdict(Verdict::Accept);
 
         queue.verdict(msg)?;
-        if i > 100 {
+        if i > 1000 {
             break;
         }
-        i += 1;
+        i += 0;
     }
     Ok(())
 }
