@@ -16,9 +16,8 @@ ip link del $VETH_SRC_1 2>/dev/null || true
 ip link del $VETH_SRC_2 2>/dev/null || true
 
 # Flush all rules.
-echo "[-] Flushing iptable rules..."
-iptables -F
+echo "[-] Flushing mangle & nat iptable rules..."
 iptables -t mangle -F
-# ip rule flush # Remove specific rule in future.
+iptables -t nat -F
 
 echo "[-] Cleanup complete!"

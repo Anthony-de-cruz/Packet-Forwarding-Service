@@ -17,7 +17,7 @@ sysctl -w net.ipv4.ip_forward=1
 echo "[+] Configuring firewall mark DNAT rules..."
 iptables -t nat -A OUTPUT \
     -m mark --mark $FW_MARK_1 \
-    -j DNAT --to-destination $DEST_IP_1
+    -j DNAT --to-destination $DEST_IP_1 
 iptables -t nat -A OUTPUT \
     -m mark --mark $FW_MARK_2 \
     -j DNAT --to-destination $DEST_IP_2
@@ -30,11 +30,13 @@ iptables -t nat -A OUTPUT \
 
 # Should probably update with conntrack to try an avoid marked packets.
 
-echo "[+] Redirecting all PREROUTING traffic to NFQueue $NFQUEUE_NUM..."
-iptables -t mangle -A OUTPUT -j NFQUEUE --queue-num $NFQUEUE_NUM --queue-bypass
+echo "[+] Redirecting all OUTPUT UDP dest port 9000 traffic to NFQueue $NFQUEUE_NUM..."
+iptables -t mangle -A OUTPUT \
+    -p udp --dport 9000 \
+    -j NFQUEUE --queue-num $NFQUEUE_NUM --queue-bypass
+    # -p icmp --icmp-type echo-request \
+    # -j LOG --log-prefix "MARKED_UDP: " \
 
 echo "[+] Setup complete!"
-ip -s link show $VETH_1_1
-ip netns exec $NS_1 ip -s link show $VETH_1_2
-ip rule list
-iptables -t mangle -L
+iptables -t mangle -nvL OUTPUT --line-numbers # Print out mangle table.
+iptables -t nat -nvL OUTPUT --line-numbers # Print out nat table.
