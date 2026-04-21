@@ -4,12 +4,15 @@ import socket
 import time
 from pathlib import Path
 
-
-IMAGE_PATH = "./sample"
-DEST_HOST = "8.8.8.8" # This serves as a dummy destination.
-DEST_PORT = 9000
+SAMPLES = (
+    ("./samples/google-meet", ("8.8.8.8", 9000)),
+    ("./samples/instagram", ("7.7.7.7", 9000)),
+    ("./samples/tiktok", ("6.6.6.6", 9000)),
+    ("./samples/twitter", ("5.5.5.5", 9000)),
+    ("./samples/youtube", ("4.4.4.4", 9000))
+)
 CHUNK_SIZE = 1200
-DELAY_SECONDS = 0.005
+DELAY_SECONDS = 0.00005
 
 
 def get_images(path: str) -> list[Path]:
@@ -23,28 +26,28 @@ def get_images(path: str) -> list[Path]:
 
 
 def main() -> None:
-    images = get_images(IMAGE_PATH)
-    if not images:
-        raise SystemExit(f"No images found at {IMAGE_PATH}")
+    traffic = []
+    for path, addr in SAMPLES:
+        traffic.append((get_images(path), addr))
+    
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            for samples, addr in traffic:
+                for sample in samples:
+                    data = sample.read_bytes()
+                    packet_count = 0
+                    for offset in range(0, len(data), CHUNK_SIZE):
+                        chunk = data[offset : offset + CHUNK_SIZE]
+                        sock.sendto(chunk, addr)
+                        packet_count += 1
+                        time.sleep(DELAY_SECONDS)
 
-    address = (DEST_HOST, DEST_PORT)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    try:
-        for image in images:
-            data = image.read_bytes()
-            packet_count = 0
-
-            for offset in range(0, len(data), CHUNK_SIZE):
-                chunk = data[offset : offset + CHUNK_SIZE]
-                sock.sendto(chunk, address)
-                packet_count += 1
-                time.sleep(DELAY_SECONDS)
-
-            print(f"sent {image} as {packet_count} UDP packet(s)")
-    finally:
-        sock.close()
-
+                    print(
+                        f"sent {sample} as {packet_count} UDP packet(s) "
+                        f"to {addr[0]}:{addr[1]}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
