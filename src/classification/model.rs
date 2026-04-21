@@ -1,11 +1,18 @@
-use std::{convert::TryFrom, fmt};
+use std::{convert::TryFrom, fmt, path::Path};
 
-use image::{DynamicImage, GenericImageView, imageops::FilterType, open};
 use ndarray::Array4;
-use ort::{inputs, session::Session, value::Value};
+use ort::{
+    inputs,
+    session::{Session, builder::GraphOptimizationLevel},
+    value::Value,
+};
 
-///
-#[derive(Debug, PartialEq, Eq, Hash)]
+const INPUT_CHANNELS: usize = 3;
+const INPUT_HEIGHT: usize = 224;
+const INPUT_WIDTH: usize = 224;
+const INPUT_SIZE: usize = INPUT_CHANNELS * INPUT_HEIGHT * INPUT_WIDTH;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrafficType {
     GoogleMeet = 0,
     Instagram = 1,
@@ -16,6 +23,7 @@ pub enum TrafficType {
 
 impl TryFrom<usize> for TrafficType {
     type Error = ();
+
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         match value {
             x if x == TrafficType::GoogleMeet as usize => Ok(TrafficType::GoogleMeet),
@@ -33,125 +41,74 @@ impl fmt::Display for TrafficType {
         match self {
             TrafficType::GoogleMeet => write!(formatter, "Google Meet"),
             TrafficType::Instagram => write!(formatter, "Instagram"),
-            TrafficType::TikTok => write!(formatter, "Tiktok"),
+            TrafficType::TikTok => write!(formatter, "TikTok"),
             TrafficType::Twitter => write!(formatter, "Twitter"),
-            TrafficType::Youtube => write!(formatter, "Youtube"),
+            TrafficType::Youtube => write!(formatter, "YouTube"),
         }
     }
 }
 
-pub fn classify_tensor(
-    session: &mut Session,
-    tensor: Array4<f32>,
-) -> Result<TrafficType, Box<dyn std::error::Error>> {
-    let input_value = Value::from_array(tensor)?;
-
-    let outputs = session.run(inputs![input_value])?;
-
-    let predictions = outputs[0].try_extract_array::<f32>()?;
-    let prediction_vec: Vec<f32> = predictions.iter().copied().collect();
-
-    let predicted_type = TrafficType::try_from(
-        prediction_vec
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, _)| idx)
-            .unwrap_or(0),
-    )
-    .unwrap();
-
-    Ok(predicted_type)
+pub struct Classification {
+    pub traffic_type: TrafficType,
+    pub scores: Vec<f32>,
 }
 
-/// Run inference on a single image
-/// Returns the predicted class index and confidence scores for all classes
-pub fn classify_image(
-    session: &mut Session,
-    image_path: &str,
-) -> Result<(TrafficType, Vec<f32>), Box<dyn std::error::Error>> {
-    let input_tensor = load_and_preprocess_image_2(image_path)?;
-    let input_value = Value::from_array(input_tensor)?;
-    let outputs = session.run(inputs![input_value])?;
-
-    let predictions = outputs[0].try_extract_array::<f32>()?;
-    let prediction_vec: Vec<f32> = predictions.iter().copied().collect();
-
-    let predicted_type = TrafficType::try_from(
-        prediction_vec
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .map(|(idx, _)| idx)
-            .unwrap_or(0),
-    )
-    .unwrap();
-
-    Ok((predicted_type, prediction_vec))
+pub struct TrafficClassifier {
+    session: Session,
 }
 
-/// Load an image file and preprocess it for ResNet50
-/// Input: path to image file
-/// Output: 4D tensor (1, 3, 224, 224) normalized with mean=0.5, std=0.5
-fn load_and_preprocess_image(image_path: &str) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
-    let img = open(image_path)?;
-    let img = img.resize_exact(224, 224, FilterType::Lanczos3);
-    let img_rgb = img.to_rgb8();
+impl TrafficClassifier {
+    pub fn from_file(model_path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+        let model_path = model_path.as_ref();
+        let session = Session::builder()?
+            .with_optimization_level(GraphOptimizationLevel::All)?
+            .commit_from_file(model_path)?;
 
-    let mut tensor = Array4::<f32>::zeros((1, 3, 224, 224));
-
-    for (x, y, pixel) in img_rgb.enumerate_pixels() {
-        let [r, g, b] = [pixel[0] as f32, pixel[1] as f32, pixel[2] as f32];
-        tensor[[0, 0, y as usize, x as usize]] = (r / 255.0 - 0.5) / 0.5;
-        tensor[[0, 1, y as usize, x as usize]] = (g / 255.0 - 0.5) / 0.5;
-        tensor[[0, 2, y as usize, x as usize]] = (b / 255.0 - 0.5) / 0.5;
+        Ok(Self { session })
     }
 
-    Ok(tensor)
+    pub fn classify_payload(
+        &mut self,
+        payload: &[u8],
+    ) -> Result<Classification, Box<dyn std::error::Error>> {
+        let tensor = packet_bytes_to_tensor(payload);
+        let input_value = Value::from_array(tensor)?;
+        let outputs = self.session.run(inputs![input_value])?;
+        let predictions = outputs[0].try_extract_array::<f32>()?;
+        let scores: Vec<f32> = predictions.iter().copied().collect();
+        let traffic_type = predicted_traffic_type(&scores)?;
+
+        Ok(Classification {
+            traffic_type,
+            scores,
+        })
+    }
 }
 
-/// Load an image file and preprocess it for ResNet50
-/// Matches Python preprocessing:
-/// - Resize shortest side to 256
-/// - Center crop to 224x224
-/// - Convert grayscale to RGB if needed
-/// - Normalize to [-1, 1] using mean=0.5, std=0.5
-/// Output: 4D tensor (1, 3, 224, 224)
-fn load_and_preprocess_image_2(image_path: &str) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
-    // Load image
-    let img = image::open(image_path)?;
+fn predicted_traffic_type(scores: &[f32]) -> Result<TrafficType, Box<dyn std::error::Error>> {
+    let predicted_index = scores
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(index, _)| index)
+        .ok_or("model returned no prediction scores")?;
 
-    // Resize so shortest side = 256 while keeping aspect ratio
-    let (width, height) = img.dimensions();
-    let scale = 256.0 / (width.min(height) as f32);
-    let new_width = (width as f32 * scale).round() as u32;
-    let new_height = (height as f32 * scale).round() as u32;
-    let img = img.resize_exact(new_width, new_height, FilterType::Triangle);
+    TrafficType::try_from(predicted_index)
+        .map_err(|_| format!("model returned unknown class index {predicted_index}").into())
+}
 
-    // Center crop to 224x224
-    let x0 = (new_width - 224) / 2;
-    let y0 = (new_height - 224) / 2;
-    let img = img.crop_imm(x0, y0, 224, 224);
+fn packet_bytes_to_tensor(bytes: &[u8]) -> Array4<f32> {
+    let mut tensor = Array4::<f32>::zeros((1, INPUT_CHANNELS, INPUT_HEIGHT, INPUT_WIDTH));
 
-    // Convert to RGB if grayscale
-    let img_rgb = match img.color().channel_count() {
-        1 => DynamicImage::ImageLuma8(img.to_luma8()).to_rgb8(),
-        _ => img.to_rgb8(),
-    };
+    for index in 0..INPUT_SIZE {
+        let value = bytes.get(index).copied().unwrap_or(0) as f32;
+        let channel = index / (INPUT_HEIGHT * INPUT_WIDTH);
+        let pixel_index = index % (INPUT_HEIGHT * INPUT_WIDTH);
+        let y = pixel_index / INPUT_WIDTH;
+        let x = pixel_index % INPUT_WIDTH;
 
-    // Allocate tensor: (1, 3, 224, 224)
-    let mut tensor = Array4::<f32>::zeros((1, 3, 224, 224));
-
-    // Fill tensor and normalize to [-1, 1]
-    for (x, y, pixel) in img_rgb.enumerate_pixels() {
-        let r = pixel[0] as f32;
-        let g = pixel[1] as f32;
-        let b = pixel[2] as f32;
-
-        tensor[[0, 0, y as usize, x as usize]] = (r / 255.0 - 0.5) / 0.5;
-        tensor[[0, 1, y as usize, x as usize]] = (g / 255.0 - 0.5) / 0.5;
-        tensor[[0, 2, y as usize, x as usize]] = (b / 255.0 - 0.5) / 0.5;
+        tensor[[0, channel, y, x]] = (value / 255.0 - 0.5) / 0.5;
     }
 
-    Ok(tensor)
+    tensor
 }

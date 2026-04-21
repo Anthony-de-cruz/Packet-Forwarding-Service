@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-image = "0.25.9"
 ndarray = "0.17.2"
 nfq = { version = "0.2.5", features = ["ct"] }
 ort = "2.0.0-rc.11"
