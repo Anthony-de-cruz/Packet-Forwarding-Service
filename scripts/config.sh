@@ -11,8 +11,8 @@ FW_MARK_4=0x804
 # Destination IPs for hardware forwarding.
 DEST_IP_1="192.168.0.90"
 DEST_IP_2="192.168.0.45"
-DEST_IP_3="192.168.0.103"
-DEST_IP_4="192.168.0.104"
+DEST_IP_3="192.168.0.90"
+DEST_IP_4="192.168.0.45"
 
 # Virtual ports and namespaces for local testing.
 VETH_SRC_1="veth-test-src-1"

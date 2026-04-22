@@ -12,7 +12,7 @@ SAMPLES = (
     ("./samples/youtube", ("4.4.4.4", 9000))
 )
 CHUNK_SIZE = 1200
-DELAY_SECONDS = 0.00005
+DELAY_SECONDS = 0.1
 
 
 def get_images(path: str) -> list[Path]:
@@ -22,7 +22,7 @@ def get_images(path: str) -> list[Path]:
 
     return sorted(
         child for child in source.iterdir() if child.is_file() and child.suffix == ".png"
-    )
+    )[:10]
 
 
 def main() -> None:

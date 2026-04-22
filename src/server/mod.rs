@@ -2,10 +2,9 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::net::Ipv4Addr;
 
-use crate::classification::model::{Classification, TrafficClassifier, TrafficType};
+use crate::classification::model::{Classification, Classifier, TrafficType};
 use nfq::{Queue, Verdict};
 
-const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
 const DEFAULT_MARK: u32 = 0x801;
 const QUEUE_NUM: u16 = 10;
 
@@ -15,14 +14,13 @@ struct ForwardDecision {
     error: Option<String>,
 }
 
-pub fn redirect() -> Result<(), Box<dyn std::error::Error>> {
-    let mut classifier = open_classifier()?;
+pub fn redirect(classifier: &mut Classifier) -> Result<(), Box<dyn std::error::Error>> {
     let mut queue = open_queue()?;
     let mut packet_count = 0;
 
     loop {
         let mut msg = queue.recv()?;
-        let decision = select_forward_mark(&mut classifier, &msg);
+        let decision = select_forward_mark(classifier, &msg);
 
         log_packet(packet_count, &msg, &decision);
         msg.set_nfmark(decision.mark);
@@ -42,14 +40,7 @@ fn open_queue() -> std::io::Result<Queue> {
     Ok(queue)
 }
 
-fn open_classifier() -> Result<TrafficClassifier, Box<dyn std::error::Error>> {
-    println!("Loading traffic classifier from {MODEL_PATH}...");
-    let classifier = TrafficClassifier::from_file(MODEL_PATH)?;
-    println!("Traffic classifier ready.");
-    Ok(classifier)
-}
-
-fn select_forward_mark(classifier: &mut TrafficClassifier, msg: &nfq::Message) -> ForwardDecision {
+fn select_forward_mark(classifier: &mut Classifier, msg: &nfq::Message) -> ForwardDecision {
     let payload = msg.get_payload();
     let classifier_payload = transport_payload(payload).unwrap_or(payload);
 
@@ -71,8 +62,8 @@ fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
     match traffic_type {
         TrafficType::GoogleMeet => 0x801,
         TrafficType::Instagram => 0x802,
-        TrafficType::TikTok => 0x802,
-        TrafficType::Twitter => 0x802,
+        TrafficType::TikTok => 0x803,
+        TrafficType::Twitter => 0x804,
         TrafficType::Youtube => 0x801,
     }
 }
@@ -96,20 +87,23 @@ fn log_packet(packet_count: u64, msg: &nfq::Message, decision: &ForwardDecision)
         msg.is_seg_offloaded(),
         msg.is_checksum_ready()
     );
-    print_process_metadata(msg);
     match describe_ipv4_packet(payload) {
         Some(desc) => println!("  flow: {desc}"),
         None => println!("  flow: unable to parse IPv4 header"),
     }
     print_classification(decision);
     print_conntrack(msg.get_conntrack());
-    println!("  mark: 0x{:X} -> 0x{:X}", msg.get_nfmark(), decision.mark);
+    println!(
+        "  fwmark: 0x{:X} -> 0x{:X}",
+        msg.get_nfmark(),
+        decision.mark
+    );
 }
 
 fn print_classification(decision: &ForwardDecision) {
     if let Some(classification) = &decision.classification {
         println!(
-            "  classification: {} confidence={:.4}",
+            "  classification: {}, confidence={:.4}",
             classification.traffic_type,
             top_score(&classification.scores)
         );
@@ -126,20 +120,6 @@ fn payload_hash(payload: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     payload.hash(&mut hasher);
     hasher.finish()
-}
-
-fn print_process_metadata(msg: &nfq::Message) {
-    let uid = msg
-        .get_uid()
-        .map_or_else(|| "-".to_string(), |uid| uid.to_string());
-    let gid = msg
-        .get_gid()
-        .map_or_else(|| "-".to_string(), |gid| gid.to_string());
-    let timestamp = msg
-        .get_timestamp()
-        .map_or_else(|| "-".to_string(), |timestamp| format!("{timestamp:?}"));
-
-    println!("  process: uid={uid} gid={gid} timestamp={timestamp}");
 }
 
 fn print_conntrack(conntrack: Option<&nfq::Conntrack>) {

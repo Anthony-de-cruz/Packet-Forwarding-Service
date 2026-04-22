@@ -1,5 +1,6 @@
 use std::{convert::TryFrom, fmt, path::Path};
 
+use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use ndarray::Array4;
 use ort::{
     inputs,
@@ -10,7 +11,6 @@ use ort::{
 const INPUT_CHANNELS: usize = 3;
 const INPUT_HEIGHT: usize = 224;
 const INPUT_WIDTH: usize = 224;
-const INPUT_SIZE: usize = INPUT_CHANNELS * INPUT_HEIGHT * INPUT_WIDTH;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrafficType {
@@ -53,11 +53,11 @@ pub struct Classification {
     pub scores: Vec<f32>,
 }
 
-pub struct TrafficClassifier {
+pub struct Classifier {
     session: Session,
 }
 
-impl TrafficClassifier {
+impl Classifier {
     pub fn from_file(model_path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let model_path = model_path.as_ref();
         let session = Session::builder()?
@@ -71,7 +71,7 @@ impl TrafficClassifier {
         &mut self,
         payload: &[u8],
     ) -> Result<Classification, Box<dyn std::error::Error>> {
-        let tensor = packet_bytes_to_tensor(payload);
+        let tensor = png_bytes_to_tensor(payload)?;
         let input_value = Value::from_array(tensor)?;
         let outputs = self.session.run(inputs![input_value])?;
         let predictions = outputs[0].try_extract_array::<f32>()?;
@@ -97,18 +97,40 @@ fn predicted_traffic_type(scores: &[f32]) -> Result<TrafficType, Box<dyn std::er
         .map_err(|_| format!("model returned unknown class index {predicted_index}").into())
 }
 
-fn packet_bytes_to_tensor(bytes: &[u8]) -> Array4<f32> {
+fn png_bytes_to_tensor(bytes: &[u8]) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
+    let image = image::load_from_memory(bytes)?;
+    Ok(preprocess_image(image))
+}
+
+fn preprocess_image(image: DynamicImage) -> Array4<f32> {
+    let (width, height) = image.dimensions();
+    let scale = 256.0 / width.min(height) as f32;
+    let resized_width = (width as f32 * scale).round() as u32;
+    let resized_height = (height as f32 * scale).round() as u32;
+    let image = image.resize_exact(resized_width, resized_height, FilterType::Triangle);
+
+    let x = (resized_width - INPUT_WIDTH as u32) / 2;
+    let y = (resized_height - INPUT_HEIGHT as u32) / 2;
+    let image = image.crop_imm(x, y, INPUT_WIDTH as u32, INPUT_HEIGHT as u32);
+    let image = match image.color().channel_count() {
+        1 => DynamicImage::ImageLuma8(image.to_luma8()).to_rgb8(),
+        _ => image.to_rgb8(),
+    };
+
     let mut tensor = Array4::<f32>::zeros((1, INPUT_CHANNELS, INPUT_HEIGHT, INPUT_WIDTH));
 
-    for index in 0..INPUT_SIZE {
-        let value = bytes.get(index).copied().unwrap_or(0) as f32;
-        let channel = index / (INPUT_HEIGHT * INPUT_WIDTH);
-        let pixel_index = index % (INPUT_HEIGHT * INPUT_WIDTH);
-        let y = pixel_index / INPUT_WIDTH;
-        let x = pixel_index % INPUT_WIDTH;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        let x = x as usize;
+        let y = y as usize;
 
-        tensor[[0, channel, y, x]] = (value / 255.0 - 0.5) / 0.5;
+        tensor[[0, 0, y, x]] = normalize_channel(pixel[0]);
+        tensor[[0, 1, y, x]] = normalize_channel(pixel[1]);
+        tensor[[0, 2, y, x]] = normalize_channel(pixel[2]);
     }
 
     tensor
+}
+
+fn normalize_channel(value: u8) -> f32 {
+    (value as f32 / 255.0 - 0.5) / 0.5
 }
