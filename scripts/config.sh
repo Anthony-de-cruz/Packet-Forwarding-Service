@@ -8,11 +8,17 @@ FW_MARK_2=0x802
 FW_MARK_3=0x803
 FW_MARK_4=0x804
 
-# Destination IPs for hardware forwarding.
-DEST_IP_1="192.168.0.90"
-DEST_IP_2="192.168.0.45"
-DEST_IP_3="192.168.0.90"
-DEST_IP_4="192.168.0.45"
+# Routing tables selected by firewall marks.
+ROUTE_TABLE_1=101
+ROUTE_TABLE_2=102
+ROUTE_TABLE_3=103
+ROUTE_TABLE_4=104
+
+# Next-hop nodes for hardware forwarding.
+NEXT_HOP_1="192.168.0.45"
+NEXT_HOP_2="192.168.0.181"
+NEXT_HOP_3="192.168.0.45"
+NEXT_HOP_4="192.168.0.181"
 
 # Virtual ports and namespaces for local testing.
 VETH_SRC_1="veth-test-src-1"
