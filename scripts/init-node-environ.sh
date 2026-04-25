@@ -3,10 +3,10 @@
 # Fail mode
 set -euo pipefail
 
-echo "-> Enabling IPv4 forwarding..."
+echo "[+] Enabling IPv4 forwarding..."
 sysctl -w net.ipv4.ip_forward=1
 
-echo "-> Configuring POSTROUTING nat ip table..."
+echo "[+] Configuring POSTROUTING nat ip table..."
 iptables -t nat -A POSTROUTING -j MASQUERADE
 
-echo "-> Forwarding node setup complete!"
+echo "[!] Forwarding node setup complete!"
