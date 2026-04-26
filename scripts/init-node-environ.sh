@@ -15,7 +15,7 @@ echo "[+] Configuring POSTROUTING nat ip table..."
 sudo iptables -t nat -A POSTROUTING -j MASQUERADE
 
 echo "[+] Configuring return routes..."
-sudo ip route replace "$BRIDGE_SUBNET" via "$HOST_IP" dev eth0
-sudo ip route replace "$UE_POOL_SUBNET" via "$HOST_IP" dev eth0
+sudo ip route add "$BRIDGE_SUBNET" via "$HOST_IP" dev eth0
+sudo ip route add "$UE_POOL_SUBNET" via "$HOST_IP" dev eth0
 
 echo "[!] Forwarding node setup complete!"
