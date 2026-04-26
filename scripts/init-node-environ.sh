@@ -4,9 +4,9 @@
 set -euo pipefail
 
 echo "[+] Enabling IPv4 forwarding..."
-sysctl -w net.ipv4.ip_forward=1
+sudo sysctl -w net.ipv4.ip_forward=1
 
 echo "[+] Configuring POSTROUTING nat ip table..."
-iptables -t nat -A POSTROUTING -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -j MASQUERADE
 
 echo "[!] Forwarding node setup complete!"

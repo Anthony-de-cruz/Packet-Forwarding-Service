@@ -4,6 +4,7 @@ import socket
 import time
 from pathlib import Path
 
+
 SAMPLES = (
     ("./samples/google-meet", ("8.8.8.8", 9000)),
     ("./samples/instagram", ("7.7.7.7", 9000)),

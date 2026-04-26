@@ -27,9 +27,13 @@ ip route flush table $ROUTE_TABLE_2 2>/dev/null || true
 ip route flush table $ROUTE_TABLE_3 2>/dev/null || true
 ip route flush table $ROUTE_TABLE_4 2>/dev/null || true
 
-# Flush packet handling rules.
-echo "[-] Flushing mangle & nat iptable rules..."
-iptables -t mangle -F
-iptables -t nat -F
+# Remove project packet handling rules.
+echo "[-] Removing project iptables rules..."
+iptables -t mangle -D OUTPUT -j NFQUEUE --queue-num $NFQUEUE_NUM --queue-bypass 2>/dev/null || true
+iptables -t mangle -D OUTPUT -p udp --dport 9000 -j NFQUEUE --queue-num $NFQUEUE_NUM --queue-bypass 2>/dev/null || true
+iptables -t nat -D POSTROUTING -j MASQUERADE 2>/dev/null || true
+iptables -t nat -D POSTROUTING -s "$BRIDGE_SUBNET" -o "$LAN_IFACE" -j MASQUERADE 2>/dev/null || true
+iptables -D FORWARD -i "$BRIDGE_NAME" -o "$LAN_IFACE" -s "$BRIDGE_SUBNET" -j ACCEPT 2>/dev/null || true
+iptables -D FORWARD -i "$LAN_IFACE" -o "$BRIDGE_NAME" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
 echo "[!] Cleanup complete!"

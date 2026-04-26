@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+
 # Configuration
 NFQUEUE_NUM=10
 
@@ -19,6 +20,12 @@ NEXT_HOP_1="192.168.0.45"
 NEXT_HOP_2="192.168.0.181"
 NEXT_HOP_3="192.168.0.45"
 NEXT_HOP_4="192.168.0.181"
+
+# Network bridge for 
+BRIDGE_NAME="br-5g"
+BRIDGE_SUBNET="10.0.0.0/24"
+BRIDGE_ADDR="10.0.0.1/24"
+LAN_IFACE="enp0s13f0u4" # YOUR LAN INTERFACE HERE (run `ip a` to list them)
 
 # Virtual ports and namespaces for local testing.
 VETH_SRC_1="veth-test-src-1"
