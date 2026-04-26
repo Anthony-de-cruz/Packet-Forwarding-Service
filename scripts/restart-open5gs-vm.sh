@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 if [[ "${EUID}" -ne 0 ]]; then
     exec sudo -E bash "$0" "$@"
 fi
@@ -22,6 +20,7 @@ fi
 systemctl restart mongod.service 2>/dev/null || true
 
 for service in "${open5gs_services[@]}"; do
+    echo "Restarting ${service}..."
     systemctl restart "$service"
 done
 
@@ -29,4 +28,4 @@ for service in "${open5gs_services[@]}"; do
     systemctl --no-pager --lines=0 status "$service"
 done
 
-echo "[+] Done"
+echo "[!] Done"
