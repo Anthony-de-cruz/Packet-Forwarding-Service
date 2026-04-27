@@ -18,10 +18,10 @@ ROUTE_TABLE_3=103
 ROUTE_TABLE_4=104
 
 # Next-hop nodes for hardware forwarding.
-NEXT_HOP_1="192.168.0.51"
+NEXT_HOP_1="192.168.0.52"
 NEXT_HOP_2="192.168.0.51"
 NEXT_HOP_3="192.168.0.51"
-NEXT_HOP_4="192.168.0.51"
+NEXT_HOP_4="192.168.0.53"
 
 # Network bridge for 
 BRIDGE_NAME="br-5g"

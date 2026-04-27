@@ -1,6 +1,6 @@
 use std::{convert::TryFrom, fmt, path::Path};
 
-use image::{DynamicImage, GenericImageView, imageops::FilterType};
+use image::{DynamicImage, GenericImageView, GrayImage, Luma, imageops::FilterType};
 use ndarray::Array4;
 use ort::{
     inputs,
@@ -11,6 +11,8 @@ use ort::{
 const INPUT_CHANNELS: usize = 3;
 const INPUT_HEIGHT: usize = 224;
 const INPUT_WIDTH: usize = 224;
+const SESSION_IMAGE_SIDE: usize = 28;
+const SESSION_IMAGE_BYTES: usize = SESSION_IMAGE_SIDE * SESSION_IMAGE_SIDE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrafficType {
@@ -71,7 +73,7 @@ impl Classifier {
         &mut self,
         payload: &[u8],
     ) -> Result<Classification, Box<dyn std::error::Error>> {
-        let tensor = png_bytes_to_tensor(payload)?;
+        let tensor = payload_to_tensor(payload)?;
         let input_value = Value::from_array(tensor)?;
         let outputs = self.session.run(inputs![input_value])?;
         let predictions = outputs[0].try_extract_array::<f32>()?;
@@ -97,9 +99,26 @@ fn predicted_traffic_type(scores: &[f32]) -> Result<TrafficType, Box<dyn std::er
         .map_err(|_| format!("model returned unknown class index {predicted_index}").into())
 }
 
-fn png_bytes_to_tensor(bytes: &[u8]) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
-    let image = image::load_from_memory(bytes)?;
-    Ok(preprocess_image(image))
+fn payload_to_tensor(bytes: &[u8]) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
+    if let Ok(image) = image::load_from_memory(bytes) {
+        return Ok(preprocess_image(image));
+    }
+
+    Ok(preprocess_image(render_bytes_as_image(bytes)))
+}
+
+fn render_bytes_as_image(bytes: &[u8]) -> DynamicImage {
+    let side = SESSION_IMAGE_SIDE as u32;
+    let mut image = GrayImage::new(side, side);
+
+    for index in 0..SESSION_IMAGE_BYTES {
+        let value = bytes.get(index).copied().unwrap_or(0);
+        let x = (index as u32) % side;
+        let y = (index as u32) / side;
+        image.put_pixel(x, y, Luma([value]));
+    }
+
+    DynamicImage::ImageLuma8(image)
 }
 
 fn preprocess_image(image: DynamicImage) -> Array4<f32> {
