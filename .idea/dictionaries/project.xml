@@ -2,6 +2,7 @@
   <dictionary name="project">
     <words>
       <w>Conntrack</w>
+      <w>conntrack</w>
     </words>
   </dictionary>
 </component>
