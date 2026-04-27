@@ -7,7 +7,8 @@ This server is dependent on:
 - Root level accces.
 - [Packet-Classifier](https://github.com/Anthony-de-cruz/Packet-Classifier) to provide a trained CNN for traffic classification.
 - [ort](https://github.com/pykeio/ort) to provide a Rust runtime for the trained model.
-- [libnetfilter_queue](https://netfilter.org/projects/libnetfilter_queue/index.html) library and the corresponding Rust binding [nfq](https://github.com/nbdd0121/nfq-rs).
+- [libnetfilter_queue](https://netfilter.org/projects/libnetfilter_queue/index.html) library and the corresponding Rust binding [nfq crate](https://github.com/nbdd0121/nfq-rs).
+- [crossbeam-channel crate](https://github.com/crossbeam-rs/crossbeam/tree/master) Thread-safe channel implementation.
 
 Associated forwarding nodes will require/benefit from:
 
