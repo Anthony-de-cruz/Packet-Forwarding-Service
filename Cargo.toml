@@ -9,3 +9,6 @@ image = "0.25.9"
 ndarray = "0.17.2"
 nfq = { version = "0.2.5", features = ["ct"] }
 ort = "2.0.0-rc.11"
+time = "0.3"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "time"] }

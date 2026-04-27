@@ -8,11 +8,13 @@ use crate::classification::model::TrafficType;
 pub(crate) use crate::server::{ClassifyResult, ClassifyTask, ConntrackId};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
+use tracing::{error, info, warn};
 
 type FwMark = u32;
 const DEFAULT_MARK: FwMark = 0x801;
 const PACKETS_FOR_CLASSIFY: usize = 5;
-const PRUNE_FLOWS_OLDER_THAN: Duration = Duration::from_secs(10);
+const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
+const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Represents the classification status
 /// regarding a specific conntrack flow.
@@ -29,6 +31,7 @@ struct FlowState {
     buf: Vec<Vec<u8>>,
     //collected_bytes: u32,
     status: ClassifyStatus,
+    first_seen: Instant,
     last_seen: Instant,
 }
 
@@ -50,6 +53,10 @@ pub fn ingress_loop(
     let mut flow_map: HashMap<ConntrackId, FlowState> = HashMap::new();
     let mut packet_count = 0usize;
     let mut byte_count = 0usize;
+    let mut packet_interval = 0usize;
+    let mut byte_interval = 0usize;
+    let mut last_log_interval = Instant::now();
+    let mut last_pruned = Instant::now();
 
     loop {
         // Rx classify results.
@@ -58,6 +65,7 @@ pub fn ingress_loop(
         // Rx packet.
         let mut msg = nfqueue.recv().unwrap();
         let payload = msg.get_payload().to_vec();
+        let payload_len = payload.len();
         let conntrack = *(&msg
             .get_conntrack()
             .expect("Failed to retrieve conntrack information.")
@@ -68,9 +76,11 @@ pub fn ingress_loop(
 
         // Log.
         packet_count += 1;
-        byte_count += msg.get_payload().len();
+        packet_interval += 1;
+        byte_count += payload_len;
+        byte_interval += payload_len;
         //log_packet(&msg, payload.clone(), conntrack, packet_count, byte_count);
-        //println!("RX={}, Conntrack={}", packet_count, conntrack);
+        //println!("RX={}, Conntrack=0x{:X?}", packet_count, conntrack);
 
         // Tx packet.
         msg.set_nfmark(match status {
@@ -81,13 +91,32 @@ pub fn ingress_loop(
         msg.set_verdict(Verdict::Accept);
         nfqueue.verdict(msg).unwrap();
 
-        // Prune stale flows every 10 packets.
-        if packet_count % 10 == 1 {
-            prune_stale_flows(&mut flow_map);
+        // Prune old connections.
+        if last_pruned.elapsed() > STALE_FLOW_PRUNE {
+            let old_conns = flow_map.len();
+            flow_map.retain(|_, flow_state| flow_state.last_seen.elapsed() < STALE_FLOW_PRUNE);
+            let new_conns = flow_map.len();
+            if old_conns != new_conns {
+                info!("Pruned connections: {:} -> {}", old_conns, new_conns);
+            }
+            last_pruned = Instant::now();
+        }
+
+        // Log throughput.
+        if last_log_interval.elapsed() > LOG_INTERVAL {
+            let time_delay = last_log_interval.elapsed().as_secs_f32();
+            info!("Total: {} packets @ {:.2} Gb",
+                packet_count,
+                (byte_count as f32 * 8.0) / 1_000_000_000.0);
+            info!("Current: {:.2}packets/s @ {:.2}Mb/s",
+                packet_interval as f32 / time_delay,
+                (byte_interval as f32 / time_delay) * 8.0 / 1_000_000.0);
+            packet_interval = 0;
+            byte_interval = 0;
+            last_log_interval = Instant::now();
         }
     }
 }
-
 ///
 ///
 /// # Arguments
@@ -105,7 +134,14 @@ fn consume_results(
             Ok(result) => {
                 if let Some(flow) = flow_map.get_mut(&result.id) {
                     flow.status = match result.classification {
-                        Ok(v) => ClassifyStatus::Pinned(mark_for_traffic_type(v)),
+                        Ok(v) => {
+                            info!(
+                                "Directing conntrack flow: 0x{:X?} -> 0x{:X?}",
+                                &result.id,
+                                mark_for_traffic_type(v)
+                            );
+                            ClassifyStatus::Pinned(mark_for_traffic_type(v))
+                        }
                         Err(_) => ClassifyStatus::Pinned(DEFAULT_MARK),
                     };
                     flow.last_seen = Instant::now();
@@ -134,12 +170,14 @@ fn handle_classification(
     payload: Vec<u8>,
 ) -> ClassifyStatus {
     if let Some(flow_state) = flow_map.get_mut(&conntrack) {
-        flow_state.buf.push(payload);
         flow_state.last_seen = Instant::now();
+        if flow_state.status != ClassifyStatus::Collecting {
+            return flow_state.status.clone()
+        }
+        flow_state.buf.push(payload);
 
         // Tx classify task if ready.
-        if flow_state.status == ClassifyStatus::Collecting
-            && flow_state.buf.len() >= PACKETS_FOR_CLASSIFY - 1
+        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY - 1
         {
             match task_tx.try_send(ClassifyTask {
                 id: conntrack,
@@ -147,10 +185,10 @@ fn handle_classification(
             }) {
                 Ok(_) => {}
                 Err(TrySendError::Disconnected(_)) => {
-                    eprintln!("Failed to send classify job. Channel disconnected.")
+                    error!("Failed to send classify job. Channel disconnected.")
                 }
                 Err(TrySendError::Full(_)) => {
-                    eprintln!("Failed to send classify job. Channel full.")
+                    warn!("Failed to send classify job. Channel full.")
                 }
             }
             flow_state.status = ClassifyStatus::Classifying;
@@ -165,10 +203,11 @@ fn handle_classification(
             FlowState {
                 buf: new_buf,
                 status: ClassifyStatus::Collecting,
+                first_seen: Instant::now(),
                 last_seen: Instant::now(),
             },
         );
-        println!("New conntrack={}", conntrack);
+        info!("New conntrack=0x{:07X?}", conntrack);
         ClassifyStatus::Collecting
     }
 }
@@ -189,16 +228,6 @@ fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
         TrafficType::Youtube => 0x801,
     }
 }
-
-/// Remove old flows.
-///
-/// # Arguments
-///
-/// * `flow_map`:
-fn prune_stale_flows(flow_map: &mut HashMap<ConntrackId, FlowState>) {
-    // Todo
-}
-
 
 // fn log_packet(packet_count: usize, msg: &nfq::Message, decision: &ForwardDecision) {
 //     let payload = msg.get_payload();
@@ -253,117 +282,117 @@ fn prune_stale_flows(flow_map: &mut HashMap<ConntrackId, FlowState>) {
 //     payload.hash(&mut hasher);
 //     hasher.finish()
 // }
-
-fn describe_ipv4_packet(payload: &[u8]) -> Option<String> {
-    if payload.len() < 20 {
-        return None;
-    }
-
-    let version = payload[0] >> 4;
-    if version != 4 {
-        return Some(format!("packet: non-IPv4 version {version}"));
-    }
-
-    let header_len = usize::from(payload[0] & 0x0F) * 4;
-    if header_len < 20 || payload.len() < header_len {
-        return None;
-    }
-
-    let total_len = u16::from_be_bytes([payload[2], payload[3]]);
-    let protocol = payload[9];
-    let src = Ipv4Addr::new(payload[12], payload[13], payload[14], payload[15]);
-    let dst = Ipv4Addr::new(payload[16], payload[17], payload[18], payload[19]);
-
-    match protocol {
-        1 => describe_icmp(payload, header_len, total_len, src, dst),
-        6 => describe_ports("tcp", payload, header_len, total_len, src, dst),
-        17 => describe_ports("udp", payload, header_len, total_len, src, dst),
-        _ => Some(format!(
-            "ipv4 {src} -> {dst} proto={protocol} total_len={total_len}"
-        )),
-    }
-}
-
-fn transport_payload(payload: &[u8]) -> Option<&[u8]> {
-    let header_len = ipv4_header_len(payload)?;
-    match payload[9] {
-        6 => tcp_payload(payload, header_len),
-        17 => udp_payload(payload, header_len),
-        _ => None,
-    }
-}
-
-fn ipv4_header_len(payload: &[u8]) -> Option<usize> {
-    if payload.len() < 20 || payload[0] >> 4 != 4 {
-        return None;
-    }
-
-    let header_len = usize::from(payload[0] & 0x0F) * 4;
-    if header_len < 20 || payload.len() < header_len {
-        return None;
-    }
-
-    Some(header_len)
-}
-
-fn udp_payload(payload: &[u8], ip_header_len: usize) -> Option<&[u8]> {
-    let udp_header_len = 8;
-    let payload_offset = ip_header_len + udp_header_len;
-    if payload.len() < payload_offset {
-        return None;
-    }
-
-    Some(&payload[payload_offset..])
-}
-
-fn tcp_payload(payload: &[u8], ip_header_len: usize) -> Option<&[u8]> {
-    if payload.len() < ip_header_len + 13 {
-        return None;
-    }
-
-    let tcp_header_len = usize::from(payload[ip_header_len + 12] >> 4) * 4;
-    let payload_offset = ip_header_len + tcp_header_len;
-    if tcp_header_len < 20 || payload.len() < payload_offset {
-        return None;
-    }
-
-    Some(&payload[payload_offset..])
-}
-
-fn describe_ports(
-    protocol_name: &str,
-    payload: &[u8],
-    header_len: usize,
-    total_len: u16,
-    src: Ipv4Addr,
-    dst: Ipv4Addr,
-) -> Option<String> {
-    if payload.len() < header_len + 4 {
-        return None;
-    }
-
-    let src_port = u16::from_be_bytes([payload[header_len], payload[header_len + 1]]);
-    let dst_port = u16::from_be_bytes([payload[header_len + 2], payload[header_len + 3]]);
-
-    Some(format!(
-        "{protocol_name} {src}:{src_port} -> {dst}:{dst_port} total_len={total_len}"
-    ))
-}
-
-fn describe_icmp(
-    payload: &[u8],
-    header_len: usize,
-    total_len: u16,
-    src: Ipv4Addr,
-    dst: Ipv4Addr,
-) -> Option<String> {
-    if payload.len() < header_len + 2 {
-        return None;
-    }
-
-    Some(format!(
-        "icmp {src} -> {dst} type={} code={} total_len={total_len}",
-        payload[header_len],
-        payload[header_len + 1]
-    ))
-}
+//
+// fn describe_ipv4_packet(payload: &[u8]) -> Option<String> {
+//     if payload.len() < 20 {
+//         return None;
+//     }
+//
+//     let version = payload[0] >> 4;
+//     if version != 4 {
+//         return Some(format!("packet: non-IPv4 version {version}"));
+//     }
+//
+//     let header_len = usize::from(payload[0] & 0x0F) * 4;
+//     if header_len < 20 || payload.len() < header_len {
+//         return None;
+//     }
+//
+//     let total_len = u16::from_be_bytes([payload[2], payload[3]]);
+//     let protocol = payload[9];
+//     let src = Ipv4Addr::new(payload[12], payload[13], payload[14], payload[15]);
+//     let dst = Ipv4Addr::new(payload[16], payload[17], payload[18], payload[19]);
+//
+//     match protocol {
+//         1 => describe_icmp(payload, header_len, total_len, src, dst),
+//         6 => describe_ports("tcp", payload, header_len, total_len, src, dst),
+//         17 => describe_ports("udp", payload, header_len, total_len, src, dst),
+//         _ => Some(format!(
+//             "ipv4 {src} -> {dst} proto={protocol} total_len={total_len}"
+//         )),
+//     }
+// }
+//
+// fn transport_payload(payload: &[u8]) -> Option<&[u8]> {
+//     let header_len = ipv4_header_len(payload)?;
+//     match payload[9] {
+//         6 => tcp_payload(payload, header_len),
+//         17 => udp_payload(payload, header_len),
+//         _ => None,
+//     }
+// }
+//
+// fn ipv4_header_len(payload: &[u8]) -> Option<usize> {
+//     if payload.len() < 20 || payload[0] >> 4 != 4 {
+//         return None;
+//     }
+//
+//     let header_len = usize::from(payload[0] & 0x0F) * 4;
+//     if header_len < 20 || payload.len() < header_len {
+//         return None;
+//     }
+//
+//     Some(header_len)
+// }
+//
+// fn udp_payload(payload: &[u8], ip_header_len: usize) -> Option<&[u8]> {
+//     let udp_header_len = 8;
+//     let payload_offset = ip_header_len + udp_header_len;
+//     if payload.len() < payload_offset {
+//         return None;
+//     }
+//
+//     Some(&payload[payload_offset..])
+// }
+//
+// fn tcp_payload(payload: &[u8], ip_header_len: usize) -> Option<&[u8]> {
+//     if payload.len() < ip_header_len + 13 {
+//         return None;
+//     }
+//
+//     let tcp_header_len = usize::from(payload[ip_header_len + 12] >> 4) * 4;
+//     let payload_offset = ip_header_len + tcp_header_len;
+//     if tcp_header_len < 20 || payload.len() < payload_offset {
+//         return None;
+//     }
+//
+//     Some(&payload[payload_offset..])
+// }
+//
+// fn describe_ports(
+//     protocol_name: &str,
+//     payload: &[u8],
+//     header_len: usize,
+//     total_len: u16,
+//     src: Ipv4Addr,
+//     dst: Ipv4Addr,
+// ) -> Option<String> {
+//     if payload.len() < header_len + 4 {
+//         return None;
+//     }
+//
+//     let src_port = u16::from_be_bytes([payload[header_len], payload[header_len + 1]]);
+//     let dst_port = u16::from_be_bytes([payload[header_len + 2], payload[header_len + 3]]);
+//
+//     Some(format!(
+//         "{protocol_name} {src}:{src_port} -> {dst}:{dst_port} total_len={total_len}"
+//     ))
+// }
+//
+// fn describe_icmp(
+//     payload: &[u8],
+//     header_len: usize,
+//     total_len: u16,
+//     src: Ipv4Addr,
+//     dst: Ipv4Addr,
+// ) -> Option<String> {
+//     if payload.len() < header_len + 2 {
+//         return None;
+//     }
+//
+//     Some(format!(
+//         "icmp {src} -> {dst} type={} code={} total_len={total_len}",
+//         payload[header_len],
+//         payload[header_len + 1]
+//     ))
+// }
