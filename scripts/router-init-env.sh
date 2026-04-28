@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 # Run reset script with absolute path.
 "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/reset.sh"
 
-echo "[+] Enabling IPv4 forwarding on host..."
+echo "[+] Enabling IPv4 forwarding..."
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo modprobe br_netfilter
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=1

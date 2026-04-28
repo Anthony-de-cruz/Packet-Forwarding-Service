@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-if [[ "${EUID}" -ne 0 ]]; then
-    exec sudo -E bash "$0" "$@"
-fi
-
 echo "[+] Restarting Open5GS stack..."
 
 mapfile -t open5gs_services < <(
@@ -17,15 +13,16 @@ if [[ "${#open5gs_services[@]}" -eq 0 ]]; then
     exit 1
 fi
 
-systemctl restart mongod.service 2>/dev/null || true
+echo "Restarting mongod..."
+sudo systemctl restart mongod.service 2>/dev/null || true
 
 for service in "${open5gs_services[@]}"; do
     echo "Restarting ${service}..."
-    systemctl restart "$service"
+    sudo systemctl restart "$service"
 done
 
 for service in "${open5gs_services[@]}"; do
     systemctl --no-pager --lines=0 status "$service"
 done
 
-echo "[!] Done"
+echo "[!] Restart complete!"
