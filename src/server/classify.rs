@@ -3,8 +3,7 @@ use crate::server::{ClassifyResult, ClassifyTask};
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use std::collections::HashMap;
 use std::thread::current;
-use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 
 ///
 ///
@@ -26,7 +25,7 @@ pub fn classify_loop(
                 let classification = classify_payloads(classifier, &task.buf);
 
                 if let Ok(classification) = &classification {
-                    info!("CLASSIFIED 0x{:X?} -> {}", task.id, classification);
+                    debug!("CLASSIFIED 0x{:X?} -> {}", task.id, classification);
                 }
 
                 match result_tx.try_send(ClassifyResult {
@@ -57,6 +56,8 @@ fn classify_payloads(
     payloads: &[Vec<u8>],
 ) -> Result<TrafficType, Box<dyn std::error::Error + Send + Sync>> {
     let mut counts = HashMap::<TrafficType, usize>::new();
+
+    //return Ok(TrafficType::GoogleMeet);
 
     for payload in payloads {
         let classification = classifier

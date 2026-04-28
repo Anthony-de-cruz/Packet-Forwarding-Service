@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (task_tx, task_rx) = bounded::<ClassifyTask>(1024);
     let (result_tx, result_rx) = unbounded::<ClassifyResult>();
 
-    start_classify_workers(2, task_rx, result_tx);
+    start_classify_workers(3, task_rx, result_tx);
     ingress_loop(&mut open_nfqueue()?, task_tx, result_rx);
     Ok(())
 }

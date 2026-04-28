@@ -8,11 +8,11 @@ use crate::classification::model::TrafficType;
 pub(crate) use crate::server::{ClassifyResult, ClassifyTask, ConntrackId};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 type FwMark = u32;
 const DEFAULT_MARK: FwMark = 0x801;
-const PACKETS_FOR_CLASSIFY: usize = 5;
+const PACKETS_FOR_CLASSIFY: usize = 3;
 const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -57,6 +57,8 @@ pub fn ingress_loop(
     let mut byte_interval = 0usize;
     let mut last_log_interval = Instant::now();
     let mut last_pruned = Instant::now();
+    let mut inefficient_count = 0usize;
+    let mut inefficient_interval = 0usize;
 
     loop {
         // Rx classify results.
@@ -74,14 +76,6 @@ pub fn ingress_loop(
         // Tx classify task.
         let status = handle_classification(&task_tx, &mut flow_map, conntrack, payload);
 
-        // Log.
-        packet_count += 1;
-        packet_interval += 1;
-        byte_count += payload_len;
-        byte_interval += payload_len;
-        //log_packet(&msg, payload.clone(), conntrack, packet_count, byte_count);
-        //println!("RX={}, Conntrack=0x{:X?}", packet_count, conntrack);
-
         // Tx packet.
         msg.set_nfmark(match status {
             ClassifyStatus::Collecting => DEFAULT_MARK,
@@ -90,6 +84,19 @@ pub fn ingress_loop(
         });
         msg.set_verdict(Verdict::Accept);
         nfqueue.verdict(msg).unwrap();
+
+        // Metrics.
+        packet_count += 1;
+        packet_interval += 1;
+        byte_count += payload_len;
+        byte_interval += payload_len;
+        match status {
+            ClassifyStatus::Classifying => {
+                inefficient_count += 1;
+                inefficient_interval += 1;
+            }
+            _ => {}
+        }
 
         // Prune old connections.
         if last_pruned.elapsed() > STALE_FLOW_PRUNE {
@@ -105,14 +112,22 @@ pub fn ingress_loop(
         // Log throughput.
         if last_log_interval.elapsed() > LOG_INTERVAL {
             let time_delay = last_log_interval.elapsed().as_secs_f32();
-            info!("Total: {} packets @ {:.2} Gb",
+            info!(
+                "Total: {} packets @ {:.2} Gb, Missed: {}",
                 packet_count,
-                (byte_count as f32 * 8.0) / 1_000_000_000.0);
-            info!("Current: {:.2}packets/s @ {:.2}Mb/s",
+                (byte_count as f32 * 8.0) / 1_000_000_000.0,
+                inefficient_count
+            );
+            info!(
+                "Current: {:.2}p/s @ {:.2}Mb/s, Missed {:.2}p/s",
                 packet_interval as f32 / time_delay,
-                (byte_interval as f32 / time_delay) * 8.0 / 1_000_000.0);
+                (byte_interval as f32 / time_delay) * 8.0 / 1_000_000.0,
+                inefficient_interval as f32 / time_delay,
+            );
+
             packet_interval = 0;
             byte_interval = 0;
+            inefficient_interval = 0;
             last_log_interval = Instant::now();
         }
     }
@@ -136,7 +151,7 @@ fn consume_results(
                     flow.status = match result.classification {
                         Ok(v) => {
                             info!(
-                                "Directing conntrack flow: 0x{:X?} -> 0x{:X?}",
+                                "Directing conntrack flow: {:#010X} -> {:#X?}",
                                 &result.id,
                                 mark_for_traffic_type(v)
                             );
@@ -172,13 +187,12 @@ fn handle_classification(
     if let Some(flow_state) = flow_map.get_mut(&conntrack) {
         flow_state.last_seen = Instant::now();
         if flow_state.status != ClassifyStatus::Collecting {
-            return flow_state.status.clone()
+            return flow_state.status.clone();
         }
         flow_state.buf.push(payload);
 
         // Tx classify task if ready.
-        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY - 1
-        {
+        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY - 1 {
             match task_tx.try_send(ClassifyTask {
                 id: conntrack,
                 buf: flow_state.buf.clone(),
@@ -207,7 +221,7 @@ fn handle_classification(
                 last_seen: Instant::now(),
             },
         );
-        info!("New conntrack=0x{:07X?}", conntrack);
+        debug!("New conntrack={:#010X?}", conntrack);
         ClassifyStatus::Collecting
     }
 }
