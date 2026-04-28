@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 echo "[+] Enabling IPv4 forwarding..."
 sudo sysctl -w net.ipv4.ip_forward=1
 
-echo "[+] Configuring POSTROUTING nat ip table..."
+echo "[+] Configuring nat POSTROUTING nat ip table..."
 sudo iptables -t nat -A POSTROUTING -j MASQUERADE
 
 echo "[+] Configuring return routes..."

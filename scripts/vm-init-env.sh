@@ -26,10 +26,9 @@ else
     sudo ip link add name "$BRIDGE_NAME" type bridge
     sudo ip addr add "$BRIDGE_ADDR" dev "$BRIDGE_NAME"
     sudo ip link set "$BRIDGE_NAME" up
-    # sudo ip link set "$LAN_IFACE" master "$BRIDGE_NAME" # The nuclear option.
 fi
 
-echo "[+] Enabling IPv4 forwarding on host..."
+echo "[+] Enabling IPv4 forwarding..."
 sudo sysctl -w net.ipv4.ip_forward=1
 
 echo "[+] Configuring bridge NAT and forwarding rules..."
