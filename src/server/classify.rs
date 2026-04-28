@@ -3,7 +3,7 @@ use crate::server::{ClassifyResult, ClassifyTask};
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::thread::current;
-use tracing::{error, warn, debug};
+use tracing::{debug, error, warn};
 
 ///
 ///
@@ -60,11 +60,9 @@ fn classify_payloads(
     //return Ok(TrafficType::GoogleMeet);
 
     for payload in payloads {
-        let classification = classifier
-            .classify_payload(payload)
-            .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
-                error.to_string().into()
-            })?;
+        let classification = classifier.classify_payload(payload).map_err(
+            |error| -> Box<dyn std::error::Error + Send + Sync> { error.to_string().into() },
+        )?;
         *counts.entry(classification.traffic_type).or_default() += 1;
     }
 

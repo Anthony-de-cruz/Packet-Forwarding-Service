@@ -1,7 +1,7 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::net::Ipv4Addr;
+//use std::collections::hash_map::DefaultHasher;
+//use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use crate::classification::model::TrafficType;
@@ -42,8 +42,7 @@ struct FlowState {
 /// * `nfqueue`: Netfilter queue to receive packets.
 /// * `task_tx`: channel to send packet classification tasks
 /// * `result_rx`: channel to receive packet classification results
-///
-/// returns: ()
+#[allow(clippy::cast_precision_loss)]
 pub fn ingress_loop(
     nfqueue: &mut Queue,
     task_tx: &Sender<ClassifyTask>,
@@ -106,18 +105,18 @@ pub fn ingress_loop(
 
         // Log throughput.
         if last_log_interval.elapsed() > LOG_INTERVAL {
-            let time_delay = last_log_interval.elapsed().as_secs_f32();
+            let time_delay = last_log_interval.elapsed().as_secs_f64();
             info!(
                 "Total: {} packets @ {:.2} Gb, Missed: {}",
                 packet_count,
-                (byte_count as f32 * 8.0) / 1_000_000_000.0,
+                (byte_count as f64 * 8.0) / 1_000_000_000.0,
                 inefficient_count
             );
             info!(
                 "Current: {:.2}p/s @ {:.2}Mb/s, Missed {:.2}p/s",
-                packet_interval as f32 / time_delay,
-                (byte_interval as f32 / time_delay) * 8.0 / 1_000_000.0,
-                inefficient_interval as f32 / time_delay,
+                packet_interval as f64 / time_delay,
+                (byte_interval as f64 / time_delay) * 8.0 / 1_000_000.0,
+                inefficient_interval as f64 / time_delay,
             );
 
             packet_interval = 0;
