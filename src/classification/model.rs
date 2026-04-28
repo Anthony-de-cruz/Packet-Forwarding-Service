@@ -8,11 +8,11 @@ use ort::{
     value::Value,
 };
 
-const INPUT_CHANNELS: usize = 3;
-const INPUT_HEIGHT: usize = 224;
-const INPUT_WIDTH: usize = 224;
-const SESSION_IMAGE_SIDE: usize = 28;
-const SESSION_IMAGE_BYTES: usize = SESSION_IMAGE_SIDE * SESSION_IMAGE_SIDE;
+const INPUT_CHANNELS: u32 = 3;
+const INPUT_HEIGHT: u32 = 224;
+const INPUT_WIDTH: u32 = 224;
+const SESSION_IMAGE_SIDE: u32 = 28;
+const SESSION_IMAGE_BYTES: u32 = SESSION_IMAGE_SIDE * SESSION_IMAGE_SIDE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrafficType {
@@ -73,7 +73,7 @@ impl Classifier {
         &mut self,
         payload: &[u8],
     ) -> Result<Classification, Box<dyn std::error::Error>> {
-        let tensor = payload_to_tensor(payload)?;
+        let tensor = image_to_tensor(&render_bytes_as_image(payload));
         let input_value = Value::from_array(tensor)?;
         let outputs = self.session.run(inputs![input_value])?;
         let predictions = outputs[0].try_extract_array::<f32>()?;
@@ -96,60 +96,71 @@ fn predicted_traffic_type(scores: &[f32]) -> Result<TrafficType, Box<dyn std::er
         .ok_or("model returned no prediction scores")?;
 
     TrafficType::try_from(predicted_index)
-        .map_err(|_| format!("model returned unknown class index {predicted_index}").into())
+        .map_err(|()| format!("model returned unknown class index {predicted_index}").into())
 }
 
-fn payload_to_tensor(bytes: &[u8]) -> Result<Array4<f32>, Box<dyn std::error::Error>> {
-    if let Ok(image) = image::load_from_memory(bytes) {
-        return Ok(preprocess_image(image));
-    }
-
-    Ok(preprocess_image(render_bytes_as_image(bytes)))
-}
-
+/// Convert bytes into image format for
+///
+/// # Arguments
+///
+/// * `bytes`:
+///
+/// returns: turn into an image.
+#[allow(clippy::cast_precision_loss)]
 fn render_bytes_as_image(bytes: &[u8]) -> DynamicImage {
-    let side = SESSION_IMAGE_SIDE as u32;
+    let side = SESSION_IMAGE_SIDE;
     let mut image = GrayImage::new(side, side);
 
     for index in 0..SESSION_IMAGE_BYTES {
-        let value = bytes.get(index).copied().unwrap_or(0);
-        let x = (index as u32) % side;
-        let y = (index as u32) / side;
-        image.put_pixel(x, y, Luma([value]));
+        let value = bytes.get(index as usize).copied().unwrap_or(0);
+        image.put_pixel(index % side, index / side, Luma([value]));
     }
 
     DynamicImage::ImageLuma8(image)
 }
 
-fn preprocess_image(image: DynamicImage) -> Array4<f32> {
+/// Convert a given image to a usable tensor.
+/// The main preprocessing step.
+///
+/// # Arguments
+///
+/// * `image`: The image to be converted.
+///
+/// returns: 4 dimensional array tensor.
+#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+fn image_to_tensor(image: &DynamicImage) -> Array4<f32> {
     let (width, height) = image.dimensions();
     let scale = 256.0 / width.min(height) as f32;
     let resized_width = (width as f32 * scale).round() as u32;
     let resized_height = (height as f32 * scale).round() as u32;
     let image = image.resize_exact(resized_width, resized_height, FilterType::Triangle);
 
-    let x = (resized_width - INPUT_WIDTH as u32) / 2;
-    let y = (resized_height - INPUT_HEIGHT as u32) / 2;
-    let image = image.crop_imm(x, y, INPUT_WIDTH as u32, INPUT_HEIGHT as u32);
+    let x = (resized_width - INPUT_WIDTH) / 2;
+    let y = (resized_height - INPUT_HEIGHT) / 2;
+    let image = image.crop_imm(x, y, INPUT_WIDTH, INPUT_HEIGHT);
     let image = match image.color().channel_count() {
         1 => DynamicImage::ImageLuma8(image.to_luma8()).to_rgb8(),
         _ => image.to_rgb8(),
     };
 
-    let mut tensor = Array4::<f32>::zeros((1, INPUT_CHANNELS, INPUT_HEIGHT, INPUT_WIDTH));
+    let mut tensor = Array4::<f32>::zeros((
+        1,
+        INPUT_CHANNELS as usize,
+        INPUT_HEIGHT as usize,
+        INPUT_WIDTH as usize,
+    ));
 
     for (x, y, pixel) in image.enumerate_pixels() {
         let x = x as usize;
         let y = y as usize;
 
-        tensor[[0, 0, y, x]] = normalize_channel(pixel[0]);
-        tensor[[0, 1, y, x]] = normalize_channel(pixel[1]);
-        tensor[[0, 2, y, x]] = normalize_channel(pixel[2]);
+        // Normalise each channel.
+        tensor[[0, 0, y, x]] = (f32::from(pixel[0]) / 255.0 - 0.5) / 0.5;
+        tensor[[0, 1, y, x]] = (f32::from(pixel[1]) / 255.0 - 0.5) / 0.5;
+        tensor[[0, 2, y, x]] = (f32::from(pixel[2]) / 255.0 - 0.5) / 0.5;
     }
 
     tensor
-}
-
-fn normalize_channel(value: u8) -> f32 {
-    (value as f32 / 255.0 - 0.5) / 0.5
 }
