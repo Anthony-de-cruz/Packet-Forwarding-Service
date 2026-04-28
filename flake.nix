@@ -21,6 +21,7 @@
             openssl
             pkg-config
             quickemu
+            spice
           ];
           shellHook = ''
             export PKG_CONFIG_PATH="${pkgs.libnetfilter_queue}/lib/pkgconfig:${pkgs.openssl}/lib/pkgconfig"
