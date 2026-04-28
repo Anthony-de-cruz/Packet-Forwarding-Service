@@ -1,9 +1,9 @@
 use crate::classification::model::{Classifier, TrafficType};
 use crate::server::{ClassifyResult, ClassifyTask};
-use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
+use crossbeam_channel::{Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::thread::current;
-use tracing::{error, info, warn, debug};
+use tracing::{error, warn, debug};
 
 ///
 ///
@@ -16,8 +16,8 @@ use tracing::{error, info, warn, debug};
 /// returns: ()
 pub fn classify_loop(
     classifier: &mut Classifier,
-    task_rx: Receiver<ClassifyTask>,
-    result_tx: Sender<ClassifyResult>,
+    task_rx: &Receiver<ClassifyTask>,
+    result_tx: &Sender<ClassifyResult>,
 ) {
     loop {
         match task_rx.recv() {
@@ -30,14 +30,14 @@ pub fn classify_loop(
 
                 match result_tx.try_send(ClassifyResult {
                     id: task.id,
-                    classification: classification.map_err(|error| error.into()),
+                    classification,
                 }) {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(TrySendError::Disconnected(_)) => {
-                        error!("Failed to send classify result. Channel disconnected.")
+                        error!("Failed to send classify result. Channel disconnected.");
                     }
                     Err(TrySendError::Full(_)) => {
-                        warn!("Failed to send classify result. Channel full.")
+                        warn!("Failed to send classify result. Channel full.");
                     }
                 }
             }
@@ -45,7 +45,7 @@ pub fn classify_loop(
                 error!(
                     "{} | Failed to receive classify task. Channel disconnected.",
                     current().name().unwrap_or("")
-                )
+                );
             }
         }
     }

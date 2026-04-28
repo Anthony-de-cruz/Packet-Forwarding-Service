@@ -24,7 +24,7 @@ fn open_classifier() -> Result<Classifier, Box<dyn std::error::Error>> {
 }
 
 fn open_nfqueue() -> std::io::Result<Queue> {
-    info!("Opening netfilter queue {QUEUE_NUM}...");
+    info!("Opening Netfilter queue {QUEUE_NUM}...");
     let mut queue = Queue::open()?;
     queue.bind(QUEUE_NUM)?;
     queue.set_recv_conntrack(QUEUE_NUM, true)?;
@@ -34,8 +34,8 @@ fn open_nfqueue() -> std::io::Result<Queue> {
 
 fn start_classify_workers(
     worker_count: usize,
-    task_rx: Receiver<ClassifyTask>,
-    result_tx: Sender<ClassifyResult>,
+    task_rx: &Receiver<ClassifyTask>,
+    result_tx: &Sender<ClassifyResult>,
 ) {
     for worker_id in 0..worker_count {
         let rx = task_rx.clone();
@@ -44,7 +44,7 @@ fn start_classify_workers(
 
         thread::Builder::new()
             .name(format!("classifier-{worker_id}"))
-            .spawn(move || classify_loop(&mut classifier, rx, tx))
+            .spawn(move || classify_loop(&mut classifier, &rx, &tx))
             .expect("Failed to spawn thread.");
     }
 }
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (task_tx, task_rx) = bounded::<ClassifyTask>(1024);
     let (result_tx, result_rx) = unbounded::<ClassifyResult>();
 
-    start_classify_workers(3, task_rx, result_tx);
-    ingress_loop(&mut open_nfqueue()?, task_tx, result_rx);
+    start_classify_workers(3, &task_rx, &result_tx);
+    ingress_loop(&mut open_nfqueue()?, &task_tx, &result_rx);
     Ok(())
 }

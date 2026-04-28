@@ -26,12 +26,11 @@ enum ClassifyStatus {
 }
 
 /// Represents the state of a given network flow,
-/// associated with a given ConntrackId.
+/// associated with a given `ConntrackId`.
 struct FlowState {
     buf: Vec<Vec<u8>>,
     //collected_bytes: u32,
     status: ClassifyStatus,
-    first_seen: Instant,
     last_seen: Instant,
 }
 
@@ -40,15 +39,15 @@ struct FlowState {
 ///
 /// # Arguments
 ///
-/// * `nfqueue`: netfilter queue to receive packets.
+/// * `nfqueue`: Netfilter queue to receive packets.
 /// * `task_tx`: channel to send packet classification tasks
 /// * `result_rx`: channel to receive packet classification results
 ///
 /// returns: ()
 pub fn ingress_loop(
     nfqueue: &mut Queue,
-    task_tx: Sender<ClassifyTask>,
-    result_rx: Receiver<ClassifyResult>,
+    task_tx: &Sender<ClassifyTask>,
+    result_rx: &Receiver<ClassifyResult>,
 ) {
     let mut flow_map: HashMap<ConntrackId, FlowState> = HashMap::new();
     let mut packet_count = 0usize;
@@ -62,24 +61,23 @@ pub fn ingress_loop(
 
     loop {
         // Rx classify results.
-        consume_results(&result_rx, &mut flow_map);
+        consume_results(result_rx, &mut flow_map);
 
         // Rx packet.
         let mut msg = nfqueue.recv().unwrap();
         let payload = msg.get_payload().to_vec();
         let payload_len = payload.len();
-        let conntrack = *(&msg
+        let conntrack = msg
             .get_conntrack()
             .expect("Failed to retrieve conntrack information.")
-            .get_id()) as ConntrackId;
+            .get_id() as ConntrackId;
 
         // Tx classify task.
-        let status = handle_classification(&task_tx, &mut flow_map, conntrack, payload);
+        let status = handle_classification(task_tx, &mut flow_map, conntrack, payload);
 
         // Tx packet.
         msg.set_nfmark(match status {
-            ClassifyStatus::Collecting => DEFAULT_MARK,
-            ClassifyStatus::Classifying => DEFAULT_MARK,
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => DEFAULT_MARK,
             ClassifyStatus::Pinned(x) => x,
         });
         msg.set_verdict(Verdict::Accept);
@@ -90,12 +88,9 @@ pub fn ingress_loop(
         packet_interval += 1;
         byte_count += payload_len;
         byte_interval += payload_len;
-        match status {
-            ClassifyStatus::Classifying => {
-                inefficient_count += 1;
-                inefficient_interval += 1;
-            }
-            _ => {}
+        if status == ClassifyStatus::Classifying {
+            inefficient_count += 1;
+            inefficient_interval += 1;
         }
 
         // Prune old connections.
@@ -163,7 +158,10 @@ fn consume_results(
                 }
             }
             Err(TryRecvError::Empty) => break,
-            Err(TryRecvError::Disconnected) => break,
+            Err(TryRecvError::Disconnected) => {
+                error!("Failed to receive classify result. Channel disconnected.");
+                break;
+            }
         }
     }
 }
@@ -177,7 +175,7 @@ fn consume_results(
 /// * `conntrack`:
 /// * `payload`:
 ///
-/// returns: ClassifyStatus
+/// returns: `ClassifyStatus`
 fn handle_classification(
     task_tx: &Sender<ClassifyTask>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
@@ -197,12 +195,12 @@ fn handle_classification(
                 id: conntrack,
                 buf: flow_state.buf.clone(),
             }) {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(TrySendError::Disconnected(_)) => {
-                    error!("Failed to send classify job. Channel disconnected.")
+                    error!("Failed to send classify job. Channel disconnected.");
                 }
                 Err(TrySendError::Full(_)) => {
-                    warn!("Failed to send classify job. Channel full.")
+                    warn!("Failed to send classify job. Channel full.");
                 }
             }
             flow_state.status = ClassifyStatus::Classifying;
@@ -217,7 +215,6 @@ fn handle_classification(
             FlowState {
                 buf: new_buf,
                 status: ClassifyStatus::Collecting,
-                first_seen: Instant::now(),
                 last_seen: Instant::now(),
             },
         );
