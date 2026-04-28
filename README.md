@@ -23,15 +23,25 @@ Associated traffic generation is dependent on either:
 Or:
 
 - The provided `Python3` script.
+- `iperf3` with the provided script.
 
 The intended setup includes 2 Ubuntu 22.04 VMs to simulate a 5G cellular network.
 However, 2 Python scripts are provided to simulate network traffic by
 transmitting packet samples via UDP. This can act as a significantly simpler interim demonstrator.
+The next level would be to set up an `iperf3` server/client to simulate a heavy traffic load.
+
+To install server dependencies:
+
+Run `git submodule init && git submodule update` to fetch Packet-Classifier. Perform any required instructions within that repo.
+
+- On Debian based Linux: install `libnetfilter-queue-dev`.
+- On Fedora Linux: install `libnetfilter_queue`.
+- Via Nix: use the provided flake via `nix develop`.
+
+## Setup
 
 > [!IMPORTANT]
 > Read the scripts found in `scripts/` understand what is going on before you run anything.
-
-## Setup
 
 To setup VMs:
 
@@ -45,7 +55,7 @@ cd ./scripts
 ./init-vm-environ.sh
 ```
 
-Once completed, go into the VMs and setup Open5gs and UERANSIM as normal.
+Once completed, go into the VMs and setup Open5GS and UERANSIM as normal.
 
 To setup server host:
 
@@ -54,12 +64,11 @@ cd ./scripts
 ./init-router-environ.sh
 ```
 
-To install server dependencies:
+On the forwarding nodes:
 
-Run `git submodule init && git submodule update` to fetch Packet-Classifier. Perform any required instructions within that repo.
+```sh
+cd ./scripts
+./init-node-environ.sh
+```
 
-- On Debian based Linux: install `libnetfilter-queue-dev`.
-- On Fedora Linux: install `libnetfilter_queue`.
-- Via Nix: use the provided flake via `nix develop`.
-
-Build/run with `sudo -E cargo run` to maintain dynamic library link.
+To build/run the router with `sudo -E cargo run` to maintain dynamic library link.
