@@ -62,13 +62,15 @@ pub struct Classifier {
 }
 
 impl Classifier {
-    ///
+    /// Load a classifier from an exported ONNX model file.
     ///
     /// # Arguments
     ///
-    /// * `model_path`:
+    /// * `model_path`: Path to the ONNX model produced by the training pipeline.
     ///
-    /// returns: Result<Classifier, Box<dyn Error, Global>>
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot be created.
     pub fn from_file(model_path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let model_path = model_path.as_ref();
         let session = Session::builder()?
@@ -78,13 +80,17 @@ impl Classifier {
         Ok(Self { session })
     }
 
-    ///
+    /// Classify a single packet payload.
     ///
     /// # Arguments
     ///
-    /// * `payload`:
+    /// * `payload`: Raw packet payload bytes. Short payloads are zero-padded and
+    ///   longer payloads are truncated to the fixed model input window.
     ///
-    /// returns:
+    /// # Errors
+    ///
+    /// Returns an error if tensor creation succeeds but model execution or
+    /// output extraction fails.
     pub fn classify_payload(
         &mut self,
         payload: &[u8],
@@ -103,13 +109,16 @@ impl Classifier {
     }
 }
 
-/// Pick the most common prediction out of the score set.
+/// Pick the highest-scoring traffic class from a model output tensor.
 ///
 /// # Arguments
 ///
 /// * `scores`: The score set produced by the CNN.
 ///
-/// returns: `TrafficType`
+/// # Panics
+///
+/// Panics if the model returns no scores or if the winning index does not map
+/// to a known [`TrafficType`].
 fn predicted_traffic_type(scores: &[f32]) -> TrafficType {
     let predicted_index = scores
         .iter()
@@ -131,7 +140,9 @@ fn predicted_traffic_type(scores: &[f32]) -> TrafficType {
 ///
 /// * `bytes`: The packet payload bytes.
 ///
-/// returns: 4 dimensional array tensor.
+/// # Returns
+///
+/// A tensor with shape `(1, 3, 224, 224)`.
 #[allow(clippy::cast_precision_loss)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]

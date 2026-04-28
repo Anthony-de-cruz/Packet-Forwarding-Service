@@ -16,8 +16,11 @@ const PACKETS_FOR_CLASSIFY: usize = 3;
 const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Represents the classification status
-/// regarding a specific conntrack flow.
+/// Classification progress for a tracked conntrack flow.
+///
+/// A flow starts in [`ClassifyStatus::Collecting`], moves to
+/// [`ClassifyStatus::Classifying`] once enough packets have been buffered for a
+/// job, and is finally pinned to a forwarding mark after inference completes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ClassifyStatus {
     Collecting,
@@ -25,8 +28,7 @@ enum ClassifyStatus {
     Pinned(FwMark),
 }
 
-/// Represents the state of a given network flow,
-/// associated with a given `ConntrackId`.
+/// Mutable state held for each observed conntrack flow.
 struct FlowState {
     buf: Vec<Vec<u8>>,
     //collected_bytes: u32,
@@ -34,14 +36,13 @@ struct FlowState {
     last_seen: Instant,
 }
 
-/// Act as the ingress for packets into the system. This function reads in packets
-/// and decides when to start classification tasks and marks packets accordingly.
+/// Act as the ingress loop for packets entering the forwarding pipeline.
 ///
 /// # Arguments
 ///
 /// * `nfqueue`: Netfilter queue to receive packets.
-/// * `task_tx`: channel to send packet classification tasks
-/// * `result_rx`: channel to receive packet classification results
+/// * `task_tx`: Channel used to enqueue classification work for worker threads.
+/// * `result_rx`: Channel used to receive completed classification results.
 #[allow(clippy::cast_precision_loss)]
 pub fn ingress_loop(
     nfqueue: &mut Queue,
@@ -126,14 +127,12 @@ pub fn ingress_loop(
         }
     }
 }
-///
+/// Drain all currently available classification results from the worker queue.
 ///
 /// # Arguments
 ///
-/// * `result_rx`:
-/// * `flow_map`:
-///
-/// returns: ()
+/// * `result_rx`: Receiver for completed classification results.
+/// * `flow_map`: Per-flow state table keyed by conntrack ID.
 fn consume_results(
     result_rx: &Receiver<ClassifyResult>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
@@ -165,16 +164,22 @@ fn consume_results(
     }
 }
 
+/// Update flow state for an incoming packet and enqueue classification if ready.
 ///
+/// Existing flows continue buffering payloads until the configured packet count
+/// is reached. New flows are inserted into the tracking table and begin in the
+/// collecting state.
 ///
 /// # Arguments
 ///
-/// * `task_tx`:
-/// * `flow_map`:
-/// * `conntrack`:
-/// * `payload`:
+/// * `task_tx`: Sender used to dispatch a completed classification batch.
+/// * `flow_map`: Mutable per-flow state table.
+/// * `conntrack`: Kernel conntrack identifier for the packet's flow.
+/// * `payload`: Raw packet payload to append to the flow buffer.
 ///
-/// returns: `ClassifyStatus`
+/// # Returns
+///
+/// The flow's current [`ClassifyStatus`] after processing this packet.
 fn handle_classification(
     task_tx: &Sender<ClassifyTask>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
@@ -222,13 +227,15 @@ fn handle_classification(
     }
 }
 
-///
+/// Map a predicted traffic class to the firewall mark used by forwarding.
 ///
 /// # Arguments
 ///
-/// * `traffic_type`:
+/// * `traffic_type`: Predicted application traffic class.
 ///
-/// returns: u32
+/// # Returns
+///
+/// The `nfmark` value that should be applied to packets from that flow.
 fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
     match traffic_type {
         TrafficType::GoogleMeet => 0x801,

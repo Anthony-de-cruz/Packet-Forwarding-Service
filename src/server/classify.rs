@@ -5,15 +5,18 @@ use std::collections::HashMap;
 use std::thread::current;
 use tracing::{debug, error, warn};
 
+/// Run the background classification worker loop.
 ///
+/// Each worker blocks on the task queue, classifies the buffered payloads for a
+/// flow, and publishes the result back to the ingress thread.
 ///
 /// # Arguments
 ///
-/// * `classifier`:
-/// * `task_rx`:
-/// * `result_tx`:
-///
-/// returns: ()
+/// * `classifier`: Reusable ONNX-backed classifier owned by this worker.
+/// * `task_rx`: Channel that delivers batches of payloads grouped by conntrack
+///   flow.
+/// * `result_tx`: Channel used to report the winning traffic class, or an
+///   inference error, back to ingress.
 pub fn classify_loop(
     classifier: &mut Classifier,
     task_rx: &Receiver<ClassifyTask>,
