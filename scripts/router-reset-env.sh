@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Grab config values.
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh" -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 # Cleanup 
 
@@ -28,7 +28,7 @@ while sudo iptables -t mangle -D PREROUTING -i "$VM_BRIDGE_NAME" -j NFQUEUE --qu
 while sudo iptables -t mangle -D FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -j NFQUEUE --queue-num "$HOST_NFQUEUE_NUM" --queue-bypass 2>/dev/null; do :; done
 while sudo iptables -t nat -D POSTROUTING -j MASQUERADE 2>/dev/null; do :; done
 while sudo iptables -t nat -D POSTROUTING -s "$VM_BRIDGE_SUBNET" -o "$HOST_LAN_IFACE" -j MASQUERADE 2>/dev/null; do :; done
-while sudo iptables -D FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$BRIDGE_SUBNET" -j ACCEPT 2>/dev/null; do :; done
+while sudo iptables -D FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$VM_BRIDGE_SUBNET" -j ACCEPT 2>/dev/null; do :; done
 while sudo iptables -D FORWARD -i "$HOST_LAN_IFACE" -o "$VM_BRIDGE_NAME" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null; do :; done
 
 echo "[!] Cleanup complete!"

@@ -3,7 +3,7 @@
 # Run this script on all forwarding nodes.
 
 # Fail mode
-#set -euo pipefail
+set -euo pipefail
 
 # Grab config values.
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"

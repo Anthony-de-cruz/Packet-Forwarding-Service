@@ -12,7 +12,7 @@ echo "[+] Enabling IPv4 forwarding..."
 sudo sysctl -w net.ipv4.ip_forward=1
 
 echo "[+] Enabling NAT masquerade for UE pool subnet traffic forwarded to WAN..."
-sudo iptables -t nat -A POSTROUTING -s "$UE_POOL_SUBNET" ! -o ogstun -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -s "$VM_UE_POOL_SUBNET" ! -o ogstun -j MASQUERADE
 
 echo "[+] Accepting all forwarded traffic ingressing via ogstun (UE upstream)..."
 sudo iptables -I FORWARD 1 -i ogstun -j ACCEPT

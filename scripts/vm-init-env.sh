@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Grab config values.
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh" -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 # Download the Ubuntu ISO if it does not exist already,
 # then copy to the correct directory.
@@ -47,8 +47,8 @@ echo "[+] Launching quickemu VMs..."
 # NixOS specific workaround: https://discourse.nixos.org/t/quickgui-with-bridged-networking-failed-to-create-tun-device/75893
 # - Bypass faulty bridger helper wrapper.
 # - Configure MAC addresses (by default they are the same which breaks inter-vm connections).
-sudo -E quickemu --vm ubuntu-22.04-open5gs.conf --display spice --extra_args "-nic bridge,br=$VM_BRIDGE_NAME,model=virtio-net-pci,mac=52:54:00:12:34:57,helper=/run/wrappers/bin/qemu-bridge-helper"
-sudo -E quickemu --vm ubuntu-22.04-ueransim.conf --display spice --extra_args "-nic bridge,br=$VM_BRIDGE_NAME,model=virtio-net-pci,mac=52:54:00:12:34:58,helper=/run/wrappers/bin/qemu-bridge-helper"
+# sudo -E quickemu --vm ubuntu-22.04-open5gs.conf --display spice --extra_args "-nic bridge,br=$VM_BRIDGE_NAME,model=virtio-net-pci,mac=52:54:00:12:34:57,helper=/run/wrappers/bin/qemu-bridge-helper"
+# sudo -E quickemu --vm ubuntu-22.04-ueransim.conf --display spice --extra_args "-nic bridge,br=$VM_BRIDGE_NAME,model=virtio-net-pci,mac=52:54:00:12:34:58,helper=/run/wrappers/bin/qemu-bridge-helper"
 
 echo "[!] Host VM setup complete!"
 echo "[!] This setup does not include DHCP so configure the VM NIC manually:"
