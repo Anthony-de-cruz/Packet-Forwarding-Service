@@ -21,6 +21,9 @@ for service in "${open5gs_services[@]}"; do
     sudo systemctl restart "$service"
 done
 
+sleep 1
+
+systemctl --no-pager --lines=0 status mongod
 for service in "${open5gs_services[@]}"; do
     systemctl --no-pager --lines=0 status "$service"
 done

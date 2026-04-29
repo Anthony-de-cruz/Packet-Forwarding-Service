@@ -82,3 +82,12 @@ On the forwarding nodes:
 ```
 
 To build/run the router with `sudo -E cargo run` to maintain dynamic library link.
+
+
+Once you are setup, try running:
+
+```sh
+./scripts/check-env.sh
+```
+
+This system has a lot of moving parts so it is helpful in case anything breaks.
