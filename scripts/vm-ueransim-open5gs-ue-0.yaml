@@ -78,5 +78,5 @@ ciphering:
 # Integrity protection maximum data rate for user plane
 integrityMaxRate:
   uplink: 'full'
-  downlink: 'full
+  downlink: 'full'
 
