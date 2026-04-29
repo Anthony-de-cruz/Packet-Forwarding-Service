@@ -50,7 +50,8 @@ To setup VMs:
 Then run:
 
 ```sh
-./scripts/vm-init-env.sh
+cd ./scripts
+./vm-init-env.sh # You need to be in the scripts dir.
 ```
 
 Once completed, go into the VMs and setup Open5GS and UERANSIM as normal.
