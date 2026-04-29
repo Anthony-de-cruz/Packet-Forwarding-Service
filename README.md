@@ -50,24 +50,34 @@ To setup VMs:
 Then run:
 
 ```sh
-cd ./scripts
-./init-vm-environ.sh
+./scripts/vm-init-env.sh
 ```
 
 Once completed, go into the VMs and setup Open5GS and UERANSIM as normal.
 
+In the Open5GS VM, follow the [quickstart guide](https://open5gs.org/open5gs/docs/guide/01-quickstart/). Then run:
+
+```sh
+./scripts/vm-open5gs-init-env.sh 
+./scripts/vm-open5gs-restart.sh 
+```
+
+In the UERANSIM VM, follow the [installation guide](https://github.com/aligungr/UERANSIM/wiki/Installation). Then run:
+
+```sh
+./scripts/vm-ueransim-init-env.sh
+```
+
 To setup server host:
 
 ```sh
-cd ./scripts
-./init-router-environ.sh
+./scripts/router-init-env.sh
 ```
 
 On the forwarding nodes:
 
 ```sh
-cd ./scripts
-./init-node-environ.sh
+./scripts/node-init-env.sh
 ```
 
 To build/run the router with `sudo -E cargo run` to maintain dynamic library link.
