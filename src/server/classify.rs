@@ -1,9 +1,21 @@
 use crate::classification::model::{Classifier, TrafficType};
-use crate::server::{ClassifyResult, ClassifyTask};
+use crate::server::ingress::ConntrackId;
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::thread::current;
 use tracing::{debug, error, warn};
+
+/// Classification work item sent from ingress to a worker thread.
+pub struct ClassifyTask {
+    pub(crate) id: ConntrackId,
+    pub(crate) buf: Vec<Vec<u8>>,
+}
+
+/// Classification result returned from a worker to ingress.
+pub struct ClassifyResult {
+    pub(crate) id: ConntrackId,
+    pub(crate) classification: Result<TrafficType, Box<dyn std::error::Error + Send + Sync>>,
+}
 
 /// Run the background classification worker loop.
 ///

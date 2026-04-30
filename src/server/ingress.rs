@@ -5,14 +5,19 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::classification::model::TrafficType;
-pub(crate) use crate::server::{ClassifyResult, ClassifyTask, ConntrackId};
+use crate::server::classify::{ClassifyResult, ClassifyTask};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
 use tracing::{debug, error, info, warn};
 
+/// Represents a kernel-level conntrack ID for a given flow.
+pub type ConntrackId = u32;
+
+/// Represents a packet firewall mark.
 type FwMark = u32;
+
 const DEFAULT_MARK: FwMark = 0x801;
-const PACKETS_FOR_CLASSIFY: usize = 3;
+const PACKETS_FOR_CLASSIFY: usize = 5;
 const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -76,10 +81,10 @@ pub fn ingress_loop(
         let status = handle_classification(task_tx, &mut flow_map, conntrack, payload);
 
         // Tx packet.
-        msg.set_nfmark(match status {
-            ClassifyStatus::Collecting | ClassifyStatus::Classifying => DEFAULT_MARK,
-            ClassifyStatus::Pinned(x) => x,
-        });
+        match status {
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {}
+            ClassifyStatus::Pinned(mark) => msg.set_nfmark(mark),
+        }
         msg.set_verdict(Verdict::Accept);
         nfqueue.verdict(msg).unwrap();
 
@@ -114,9 +119,10 @@ pub fn ingress_loop(
                 inefficient_count
             );
             info!(
-                "Current: {:.2}p/s @ {:.2}Mb/s, Missed {:.2}p/s",
+                "Current: {:.2}p/s @ {:.2}Mb/s, Missed {:.2}% @ {:.2}p/s",
                 packet_interval as f64 / time_delay,
                 (byte_interval as f64 / time_delay) * 8.0 / 1_000_000.0,
+                inefficient_interval as f64 / packet_interval as f64 * 100.0,
                 inefficient_interval as f64 / time_delay,
             );
 
@@ -144,7 +150,7 @@ fn consume_results(
                     flow.status = match result.classification {
                         Ok(v) => {
                             info!(
-                                "Directing conntrack flow: {:#010X} -> {:#X?}",
+                                "Directing conntrack {:#010X} -> {:#X?}",
                                 &result.id,
                                 mark_for_traffic_type(v)
                             );
@@ -194,7 +200,7 @@ fn handle_classification(
         flow_state.buf.push(payload);
 
         // Tx classify task if ready.
-        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY - 1 {
+        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY {
             match task_tx.try_send(ClassifyTask {
                 id: conntrack,
                 buf: flow_state.buf.clone(),
@@ -242,7 +248,7 @@ fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
         TrafficType::Instagram => 0x802,
         TrafficType::TikTok => 0x803,
         TrafficType::Twitter => 0x804,
-        TrafficType::Youtube => 0x801,
+        TrafficType::Youtube => 0x802,
     }
 }
 
