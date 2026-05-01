@@ -9,8 +9,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::time::UtcTime;
 
 use crate::classification::model::Classifier;
-use crate::server::classify::classify_loop;
-use crate::server::ingress::{ClassifyResult, ClassifyTask, ingress_loop};
+use crate::server::classify::{ClassifyResult, ClassifyTask, classify_loop};
+use crate::server::ingress::ingress_loop;
 use std::thread;
 
 const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
@@ -50,8 +50,8 @@ fn start_classify_workers(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Set up logging.
     let log_time_format = parse("[hour]:[minute]:[second]")?;
-
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()

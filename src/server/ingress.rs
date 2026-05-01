@@ -1,11 +1,12 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
+use std::env;
 //use std::collections::hash_map::DefaultHasher;
 //use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use crate::classification::model::TrafficType;
-use crate::server::classify::{ClassifyResult, ClassifyTask};
+pub(crate) use crate::server::classify::{ClassifyResult, ClassifyTask};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
 use tracing::{debug, error, info, warn};
@@ -17,9 +18,43 @@ pub type ConntrackId = u32;
 type FwMark = u32;
 
 const DEFAULT_MARK: FwMark = 0x801;
-const PACKETS_FOR_CLASSIFY: usize = 5;
+const SESSION_IMAGE_SIDE: usize = 28;
+const SESSION_IMAGE_BYTES: usize = SESSION_IMAGE_SIDE * SESSION_IMAGE_SIDE;
+const MIN_PACKETS_FOR_CLASSIFY: usize = 5;
 const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug)]
+enum RouteMode {
+    /// Do not set packet marks. This is useful to prove classification itself is not breaking traffic.
+    Observe,
+    /// Forward every packet in a flow through the default route from the first packet onward.
+    StableDefault,
+    /// Apply the predicted class mark after inference. This can break NATed TCP flows.
+    Classified,
+    /// Drop packets once the flow has a classification result.
+    Block,
+}
+
+impl RouteMode {
+    fn from_env() -> Self {
+        match env::var("PFS_ROUTE_MODE") {
+            Ok(value) if value.eq_ignore_ascii_case("observe") => Self::Observe,
+            Ok(value) if value.eq_ignore_ascii_case("stable") => Self::StableDefault,
+            Ok(value) if value.eq_ignore_ascii_case("stable-default") => Self::StableDefault,
+            Ok(value) if value.eq_ignore_ascii_case("stable_default") => Self::StableDefault,
+            Ok(value) if value.eq_ignore_ascii_case("classified") => Self::Classified,
+            Ok(value) if value.eq_ignore_ascii_case("block") => Self::Block,
+            Ok(value) if value.eq_ignore_ascii_case("blocked") => Self::Block,
+            Ok(value) if value.eq_ignore_ascii_case("blocking") => Self::Block,
+            Ok(value) => {
+                warn!("Unknown PFS_ROUTE_MODE={value:?}; using stable-default");
+                Self::StableDefault
+            }
+            Err(_) => Self::StableDefault,
+        }
+    }
+}
 
 /// Classification progress for a tracked conntrack flow.
 ///
@@ -35,8 +70,8 @@ enum ClassifyStatus {
 
 /// Mutable state held for each observed conntrack flow.
 struct FlowState {
-    buf: Vec<Vec<u8>>,
-    //collected_bytes: u32,
+    sample: Vec<u8>,
+    packets_seen: usize,
     status: ClassifyStatus,
     last_seen: Instant,
 }
@@ -54,6 +89,9 @@ pub fn ingress_loop(
     task_tx: &Sender<ClassifyTask>,
     result_rx: &Receiver<ClassifyResult>,
 ) {
+    let route_mode = RouteMode::from_env();
+    info!("Using {route_mode:?} route mode.");
+
     let mut flow_map: HashMap<ConntrackId, FlowState> = HashMap::new();
     let mut packet_count = 0usize;
     let mut byte_count = 0usize;
@@ -66,26 +104,30 @@ pub fn ingress_loop(
 
     loop {
         // Rx classify results.
-        consume_results(result_rx, &mut flow_map);
+        consume_results(result_rx, &mut flow_map, route_mode);
 
         // Rx packet.
         let mut msg = nfqueue.recv().unwrap();
-        let payload = msg.get_payload().to_vec();
-        let payload_len = payload.len();
+        let packet = msg.get_payload();
+        let payload_len = packet.len();
         let conntrack = msg
             .get_conntrack()
             .expect("Failed to retrieve conntrack information.")
             .get_id() as ConntrackId;
 
         // Tx classify task.
-        let status = handle_classification(task_tx, &mut flow_map, conntrack, payload);
+        let status = handle_classification(task_tx, &mut flow_map, conntrack, packet);
 
         // Tx packet.
-        match status {
-            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {}
-            ClassifyStatus::Pinned(mark) => msg.set_nfmark(mark),
+        match forwarding_action(&status, route_mode) {
+            ForwardingAction::Accept { mark } => {
+                if let Some(mark) = mark {
+                    msg.set_nfmark(mark);
+                }
+                msg.set_verdict(Verdict::Accept);
+            }
+            ForwardingAction::Drop => msg.set_verdict(Verdict::Drop),
         }
-        msg.set_verdict(Verdict::Accept);
         nfqueue.verdict(msg).unwrap();
 
         // Metrics.
@@ -133,6 +175,33 @@ pub fn ingress_loop(
         }
     }
 }
+
+enum ForwardingAction {
+    Accept { mark: Option<FwMark> },
+    Drop,
+}
+
+fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> ForwardingAction {
+    match route_mode {
+        RouteMode::Observe => ForwardingAction::Accept { mark: None },
+        RouteMode::StableDefault => ForwardingAction::Accept {
+            mark: Some(DEFAULT_MARK),
+        },
+        RouteMode::Classified => match status {
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
+                ForwardingAction::Accept { mark: None }
+            }
+            ClassifyStatus::Pinned(mark) => ForwardingAction::Accept { mark: Some(*mark) },
+        },
+        RouteMode::Block => match status {
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
+                ForwardingAction::Accept { mark: None }
+            }
+            ClassifyStatus::Pinned(_) => ForwardingAction::Drop,
+        },
+    }
+}
+
 /// Drain all currently available classification results from the worker queue.
 ///
 /// # Arguments
@@ -142,6 +211,7 @@ pub fn ingress_loop(
 fn consume_results(
     result_rx: &Receiver<ClassifyResult>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
+    route_mode: RouteMode,
 ) {
     loop {
         match result_rx.try_recv() {
@@ -149,12 +219,19 @@ fn consume_results(
                 if let Some(flow) = flow_map.get_mut(&result.id) {
                     flow.status = match result.classification {
                         Ok(v) => {
-                            info!(
-                                "Directing conntrack {:#010X} -> {:#X?}",
-                                &result.id,
-                                mark_for_traffic_type(v)
-                            );
-                            ClassifyStatus::Pinned(mark_for_traffic_type(v))
+                            let mark = mark_for_traffic_type(v);
+                            match route_mode {
+                                RouteMode::Block => {
+                                    info!("Blocking conntrack {:#010X} -> {}", &result.id, v);
+                                }
+                                _ => {
+                                    info!(
+                                        "Directing conntrack {:#010X} -> {} ({:#X?})",
+                                        &result.id, v, mark
+                                    );
+                                }
+                            }
+                            ClassifyStatus::Pinned(mark)
                         }
                         Err(_) => ClassifyStatus::Pinned(DEFAULT_MARK),
                     };
@@ -172,8 +249,8 @@ fn consume_results(
 
 /// Update flow state for an incoming packet and enqueue classification if ready.
 ///
-/// Existing flows continue buffering payloads until the configured packet count
-/// is reached. New flows are inserted into the tracking table and begin in the
+/// Existing flows continue buffering sample bytes until enough flow data is
+/// available. New flows are inserted into the tracking table and begin in the
 /// collecting state.
 ///
 /// # Arguments
@@ -181,7 +258,7 @@ fn consume_results(
 /// * `task_tx`: Sender used to dispatch a completed classification batch.
 /// * `flow_map`: Mutable per-flow state table.
 /// * `conntrack`: Kernel conntrack identifier for the packet's flow.
-/// * `payload`: Raw packet payload to append to the flow buffer.
+/// * `sample_bytes`: Packet bytes selected for model input.
 ///
 /// # Returns
 ///
@@ -190,47 +267,62 @@ fn handle_classification(
     task_tx: &Sender<ClassifyTask>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
     conntrack: ConntrackId,
-    payload: Vec<u8>,
+    sample_bytes: &[u8],
 ) -> ClassifyStatus {
-    if let Some(flow_state) = flow_map.get_mut(&conntrack) {
-        flow_state.last_seen = Instant::now();
-        if flow_state.status != ClassifyStatus::Collecting {
-            return flow_state.status.clone();
-        }
-        flow_state.buf.push(payload);
-
-        // Tx classify task if ready.
-        if flow_state.buf.len() >= PACKETS_FOR_CLASSIFY {
-            match task_tx.try_send(ClassifyTask {
-                id: conntrack,
-                buf: flow_state.buf.clone(),
-            }) {
-                Ok(()) => {}
-                Err(TrySendError::Disconnected(_)) => {
-                    error!("Failed to send classify job. Channel disconnected.");
-                }
-                Err(TrySendError::Full(_)) => {
-                    warn!("Failed to send classify job. Channel full.");
-                }
-            }
-            flow_state.status = ClassifyStatus::Classifying;
-        }
-        flow_state.status.clone()
-    } else {
-        // Track new connection.
-        let mut new_buf: Vec<Vec<u8>> = Vec::with_capacity(PACKETS_FOR_CLASSIFY);
-        new_buf.push(payload);
+    if !flow_map.contains_key(&conntrack) {
         flow_map.insert(
             conntrack,
             FlowState {
-                buf: new_buf,
+                sample: Vec::with_capacity(SESSION_IMAGE_BYTES),
+                packets_seen: 0,
                 status: ClassifyStatus::Collecting,
                 last_seen: Instant::now(),
             },
         );
         debug!("New conntrack={:#010X?}", conntrack);
-        ClassifyStatus::Collecting
     }
+
+    let flow_state = flow_map
+        .get_mut(&conntrack)
+        .expect("flow state should exist after insert");
+
+    flow_state.last_seen = Instant::now();
+    if flow_state.status != ClassifyStatus::Collecting {
+        return flow_state.status.clone();
+    }
+
+    flow_state.packets_seen += 1;
+    append_sample_bytes(&mut flow_state.sample, &sample_bytes);
+
+    // Tx classify task if ready.
+    if ready_for_classify(flow_state) {
+        match task_tx.try_send(ClassifyTask {
+            id: conntrack,
+            sample: flow_state.sample.clone(),
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Disconnected(_)) => {
+                error!("Failed to send classify job. Channel disconnected.");
+            }
+            Err(TrySendError::Full(_)) => {
+                warn!("Failed to send classify job. Channel full.");
+            }
+        }
+        flow_state.status = ClassifyStatus::Classifying;
+    }
+
+    flow_state.status.clone()
+}
+
+fn ready_for_classify(flow_state: &FlowState) -> bool {
+    flow_state.sample.len() >= SESSION_IMAGE_BYTES
+        || (flow_state.packets_seen >= MIN_PACKETS_FOR_CLASSIFY && !flow_state.sample.is_empty())
+}
+
+fn append_sample_bytes(sample: &mut Vec<u8>, bytes: &[u8]) {
+    let available = SESSION_IMAGE_BYTES.saturating_sub(sample.len());
+    let copied_len = bytes.len().min(available);
+    sample.extend_from_slice(&bytes[..copied_len]);
 }
 
 /// Map a predicted traffic class to the firewall mark used by forwarding.
@@ -244,11 +336,11 @@ fn handle_classification(
 /// The `nfmark` value that should be applied to packets from that flow.
 fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
     match traffic_type {
-        TrafficType::GoogleMeet => 0x801,
-        TrafficType::Instagram => 0x802,
+        TrafficType::GoogleMeet => 0x802,
+        TrafficType::Instagram => 0x801,
         TrafficType::TikTok => 0x803,
-        TrafficType::Twitter => 0x804,
-        TrafficType::Youtube => 0x802,
+        TrafficType::Twitter => 0x803,
+        TrafficType::Youtube => 0x801,
     }
 }
 
