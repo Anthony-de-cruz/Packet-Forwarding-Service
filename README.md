@@ -4,7 +4,7 @@
 
 The router is dependent on:
 
-- Root level accces.
+- Root level access.
 - Kernel modules: `br_netfilter`, `nfnetlink_queue`, `nf_conntrack`
 - [Packet-Classifier](https://github.com/Anthony-de-cruz/Packet-Classifier) to provide a trained CNN for traffic classification.
 - [ort](https://github.com/pykeio/ort) to provide a Rust runtime for the trained model.
@@ -42,7 +42,7 @@ The next level would be to set up an `iperf3` server/client to simulate a heavy 
 > [!IMPORTANT]
 > Read the scripts found in `scripts/` understand what is going on before you run anything.
 
-To setup VMs:
+To set up VMs:
 
 - On Debian or Fedora based Linux: follow official instructions [here](https://github.com/quickemu-project/quickemu/wiki/01-Installation) to install `quickemu`.
 - Via Nix: use the provided flake via `nix develop`.
@@ -69,7 +69,7 @@ In the UERANSIM VM, follow the [installation guide](https://github.com/aligungr/
 ./scripts/vm-ueransim-init-env.sh
 ```
 
-To setup server host:
+To set up server host:
 
 ```sh
 ./scripts/router-init-env.sh
@@ -84,10 +84,16 @@ On the forwarding nodes:
 To build/run the router with `sudo -E cargo run` to maintain dynamic library link.
 
 
-Once you are setup, try running:
+Once you are set up, try running:
 
 ```sh
 ./scripts/check-env.sh
 ```
 
 This system has a lot of moving parts so it is helpful in case anything breaks.
+
+The following may be helpful for monitoring traffic on individual nodes:
+
+```
+sudo iftop -i eth0 -nNp
+```

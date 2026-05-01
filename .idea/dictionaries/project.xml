@@ -4,6 +4,8 @@
       <w>Conntrack</w>
       <w>conns</w>
       <w>conntrack</w>
+      <w>libnetfilter</w>
+      <w>quickemu</w>
       <w>ueransim</w>
     </words>
   </dictionary>
