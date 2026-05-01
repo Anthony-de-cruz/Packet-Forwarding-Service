@@ -13,11 +13,12 @@ URLS = [
     "https://www.youtube.com/results?search_query=cat+videos",
     "https://x.com/",
     "https://twitter.com/",
+    "https://www.instagram.com/"
 ]
 
-DURATION = 60
+DURATION = 60000
 CONCURRENCY = 2
-UE_INTERFACES: list[str] = []
+UE_INTERFACES = ["uesimtun0"]
 REQUEST_TIMEOUT = 15
 MIN_SLEEP = 1.0
 MAX_SLEEP = 4.0
@@ -31,16 +32,14 @@ def run_curl(url: str, iface: str, timeout: int) -> tuple[int, str]:
         "--location",
         "--max-time",
         str(timeout),
+        "--interface",
+        iface,
         "--output",
         "/dev/null",
         "--write-out",
         "code=%{http_code} time=%{time_total} size=%{size_download} url=%{url_effective}",
+        url
     ]
-
-    if iface:
-        cmd.extend(["--interface", iface])
-
-    cmd.append(url)
 
     completed = subprocess.run(
         cmd,
@@ -66,15 +65,13 @@ def worker_loop(
     max_sleep: float,
     print_lock: threading.Lock,
 ) -> None:
-    iface_label = iface or "default"
-
     while time.monotonic() < end_time:
         url = random.choice(URLS)
         status, output = run_curl(url, iface, timeout)
 
         with print_lock:
             print(
-                f"worker={worker_id} iface={iface_label} "
+                f"worker={worker_id} iface={iface} "
                 f"curl_status={status} {output}",
                 flush=True,
             )
@@ -83,7 +80,6 @@ def worker_loop(
 
 
 def main() -> None:
-    ifaces = UE_INTERFACES or [""]
     end_time = time.monotonic() + DURATION
     print_lock = threading.Lock()
     threads: list[threading.Thread] = []
@@ -94,7 +90,7 @@ def main() -> None:
         flush=True,
     )
 
-    for iface in ifaces:
+    for iface in UE_INTERFACES:
         for worker_id in range(1, CONCURRENCY + 1):
             thread = threading.Thread(
                 target=worker_loop,
@@ -118,4 +114,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
