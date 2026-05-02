@@ -32,8 +32,6 @@ enum RouteMode {
     StableDefault,
     /// Apply the predicted class mark after inference. This can break NATed TCP flows.
     Classified,
-    /// Drop packets once the flow has a classification result.
-    Block,
 }
 
 impl RouteMode {
@@ -44,9 +42,6 @@ impl RouteMode {
             Ok(value) if value.eq_ignore_ascii_case("stable-default") => Self::StableDefault,
             Ok(value) if value.eq_ignore_ascii_case("stable_default") => Self::StableDefault,
             Ok(value) if value.eq_ignore_ascii_case("classified") => Self::Classified,
-            Ok(value) if value.eq_ignore_ascii_case("block") => Self::Block,
-            Ok(value) if value.eq_ignore_ascii_case("blocked") => Self::Block,
-            Ok(value) if value.eq_ignore_ascii_case("blocking") => Self::Block,
             Ok(value) => {
                 warn!("Unknown PFS_ROUTE_MODE={value:?}; using stable-default");
                 Self::StableDefault
@@ -104,7 +99,7 @@ pub fn ingress_loop(
 
     loop {
         // Rx classify results.
-        consume_results(result_rx, &mut flow_map, route_mode);
+        consume_results(result_rx, &mut flow_map);
 
         // Rx packet.
         let mut msg = nfqueue.recv().unwrap();
@@ -126,7 +121,6 @@ pub fn ingress_loop(
                 }
                 msg.set_verdict(Verdict::Accept);
             }
-            ForwardingAction::Drop => msg.set_verdict(Verdict::Drop),
         }
         nfqueue.verdict(msg).unwrap();
 
@@ -178,7 +172,6 @@ pub fn ingress_loop(
 
 enum ForwardingAction {
     Accept { mark: Option<FwMark> },
-    Drop,
 }
 
 fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> ForwardingAction {
@@ -193,12 +186,6 @@ fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> Forwardi
             }
             ClassifyStatus::Pinned(mark) => ForwardingAction::Accept { mark: Some(*mark) },
         },
-        RouteMode::Block => match status {
-            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
-                ForwardingAction::Accept { mark: None }
-            }
-            ClassifyStatus::Pinned(_) => ForwardingAction::Drop,
-        },
     }
 }
 
@@ -211,7 +198,6 @@ fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> Forwardi
 fn consume_results(
     result_rx: &Receiver<ClassifyResult>,
     flow_map: &mut HashMap<ConntrackId, FlowState>,
-    route_mode: RouteMode,
 ) {
     loop {
         match result_rx.try_recv() {
@@ -220,17 +206,10 @@ fn consume_results(
                     flow.status = match result.classification {
                         Ok(v) => {
                             let mark = mark_for_traffic_type(v);
-                            match route_mode {
-                                RouteMode::Block => {
-                                    info!("Blocking conntrack {:#010X} -> {}", &result.id, v);
-                                }
-                                _ => {
-                                    info!(
-                                        "Directing conntrack {:#010X} -> {} ({:#X?})",
-                                        &result.id, v, mark
-                                    );
-                                }
-                            }
+                            info!(
+                                "Directing conntrack {:#010X} -> {} ({:#X?})",
+                                &result.id, v, mark
+                            );
                             ClassifyStatus::Pinned(mark)
                         }
                         Err(_) => ClassifyStatus::Pinned(DEFAULT_MARK),
