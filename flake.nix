@@ -24,9 +24,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             rust-bin.stable.latest.default
-            (python3.withPackages (python-pkgs: [
-              python-pkgs.pillow
-            ]))
+            uv
             libnetfilter_queue
             openssl
             pkg-config
