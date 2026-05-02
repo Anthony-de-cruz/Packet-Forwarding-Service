@@ -11,9 +11,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 echo "[+] Enabling IPv4 forwarding..."
 sudo sysctl -w net.ipv4.ip_forward=1
 
-echo "[+] Enabling NAT masquerade for UE pool subnet traffic forwarded to WAN..."
-sudo iptables -t nat -C POSTROUTING -s "$VM_UE_POOL_SUBNET" ! -o ogstun -j MASQUERADE 2>/dev/null || \
-    sudo iptables -t nat -A POSTROUTING -s "$VM_UE_POOL_SUBNET" ! -o ogstun -j MASQUERADE
+echo "[+] Removing Open5GS-side NAT for routed UE pool visibility..."
+while sudo iptables -t nat -D POSTROUTING -s "$VM_UE_POOL_SUBNET" ! -o ogstun -j MASQUERADE 2>/dev/null; do :; done
+while sudo iptables -t nat -D POSTROUTING -s "$VM_UE_POOL_SUBNET" -j MASQUERADE 2>/dev/null; do :; done
 
 echo "[+] Accepting all forwarded traffic ingressing via ogstun (UE upstream)..."
 sudo iptables -C FORWARD -i ogstun -j ACCEPT 2>/dev/null || \

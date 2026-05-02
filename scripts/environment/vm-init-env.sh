@@ -55,7 +55,7 @@ sudo -E quickemu --vm ubuntu-22.04-ueransim.conf --display spice --extra_args "-
 
 echo "[!] Host VM setup complete!"
 echo "[!] This setup does not include DHCP so configure the VM NIC manually:"
-echo "    VM 1   address: 10.0.0.2/24"
-echo "    VM 2   address: 10.0.0.3/24"
-echo "    VM 1+2 gateway: 10.0.0.1"
+echo "    VM 1   address: $VM_OPEN5GS_IP/24"
+echo "    VM 2   address: $VM_UERANSIM_IP/24"
+echo "    VM 1+2 gateway: ${VM_BRIDGE_ADDR%/*}"
 echo "    VM 1+2 dns: 1.1.1.1"

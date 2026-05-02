@@ -4,6 +4,10 @@ import socket
 import time
 from pathlib import Path
 
+from PIL import Image
+
+SAMPLE_PATH = "../../Packet-Classifier/data/test"
+DEST_ADDR = ("192.168.0.54", 9000)
 
 SAMPLES = (
     ("./samples/google-meet", ("8.8.8.8", 9000)),
@@ -14,7 +18,7 @@ SAMPLES = (
 )
 CHUNK_SIZE = 1200
 DELAY_SECONDS = 0.1
-
+SAMPLE_SIZE = (28, 28)
 
 def get_images(path: str) -> list[Path]:
     source = Path(path)
@@ -26,6 +30,11 @@ def get_images(path: str) -> list[Path]:
     )[:10]
 
 
+def sample_bytes(path: Path) -> bytes:
+    with Image.open(path) as image:
+        return image.convert("L").resize(SAMPLE_SIZE).tobytes()
+
+
 def main() -> None:
     traffic = []
     for path, addr in SAMPLES:
@@ -35,7 +44,7 @@ def main() -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             for samples, addr in traffic:
                 for sample in samples:
-                    data = sample.read_bytes()
+                    data = sample_bytes(sample)
                     packet_count = 0
                     for offset in range(0, len(data), CHUNK_SIZE):
                         chunk = data[offset : offset + CHUNK_SIZE]
