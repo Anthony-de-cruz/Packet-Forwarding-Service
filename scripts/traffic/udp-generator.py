@@ -6,55 +6,61 @@ from pathlib import Path
 
 from PIL import Image
 
-SAMPLE_PATH = "../../Packet-Classifier/data/test"
-DEST_ADDR = ("192.168.0.54", 9000)
+SAMPLE_TYPE_DIR_PATHS = [
+    "../../Packet-Classifier/data/test/google-meet",
+    "../../Packet-Classifier/data/test/instagram",
+    "../../Packet-Classifier/data/test/tiktok",
+    "../../Packet-Classifier/data/test/twitter",
+    "../../Packet-Classifier/data/test/youtube",
+]
+DEST_ADDR = "192.168.0.54", 9000
 
-SAMPLES = (
-    ("./samples/google-meet", ("8.8.8.8", 9000)),
-    ("./samples/instagram", ("7.7.7.7", 9000)),
-    ("./samples/tiktok", ("6.6.6.6", 9000)),
-    ("./samples/twitter", ("5.5.5.5", 9000)),
-    ("./samples/youtube", ("4.4.4.4", 9000))
-)
 CHUNK_SIZE = 1200
 DELAY_SECONDS = 0.1
 SAMPLE_SIZE = (28, 28)
 
-def get_images(path: str) -> list[Path]:
-    source = Path(path)
-    if source.is_file():
-        return [source]
 
-    return sorted(
-        child for child in source.iterdir() if child.is_file() and child.suffix == ".png"
-    )[:10]
+def extract_samples(sample_type_dirs: list[str]) -> list[list[bytes]]:
+    # Find all samples.
+    sample_type_paths = []
+    for dir in sample_type_dirs:
+        sample_type_paths.append(
+            sorted(
+                child
+                for child in Path(dir).iterdir()
+                if child.is_file() and child.suffix == ".png"
+            )[:10]
+        )
 
+    # Extract and preprocess each sample.
+    sample_bytes = []
+    for sample_dir in sample_type_paths:
+        for sample_path in sample_dir:
+            with Image.open(sample_path) as image:
+                sample_bytes.append(image.convert("L").resize(SAMPLE_SIZE).tobytes())
 
-def sample_bytes(path: Path) -> bytes:
-    with Image.open(path) as image:
-        return image.convert("L").resize(SAMPLE_SIZE).tobytes()
+    return sample_bytes
 
 
 def main() -> None:
-    traffic = []
-    for path, addr in SAMPLES:
-        traffic.append((get_images(path), addr))
-    
+    sample_set = extract_samples(SAMPLE_TYPE_DIR_PATHS)
+
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            for samples, addr in traffic:
+            for samples in sample_set:
                 for sample in samples:
-                    data = sample_bytes(sample)
                     packet_count = 0
-                    for offset in range(0, len(data), CHUNK_SIZE):
-                        chunk = data[offset : offset + CHUNK_SIZE]
-                        sock.sendto(chunk, addr)
+                    for offset in range(0, len(sample), CHUNK_SIZE):
+                        chunk = sample[offset : offset + CHUNK_SIZE]
+                        sock.sendto(chunk, DEST_ADDR)
                         packet_count += 1
                         time.sleep(DELAY_SECONDS)
 
                     print(
                         f"sent {sample} as {packet_count} UDP packet(s) "
-                        f"to {addr[0]}:{addr[1]}")
+                        f"to {DEST_ADDR[0]}:{DEST_ADDR[1]}"
+                    )
+
 
 if __name__ == "__main__":
     try:

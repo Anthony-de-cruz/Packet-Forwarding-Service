@@ -3,14 +3,13 @@
 import socket
 
 
-LISTEN_HOST = "0.0.0.0"
-LISTEN_PORT = 9000
+UDP_LISTEN_ADDR = "0.0.0.0", 9000
 
 
 def main() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.bind((LISTEN_HOST, LISTEN_PORT))
-        print(f"Listening: {LISTEN_HOST}:{LISTEN_PORT}")
+        sock.bind(UDP_LISTEN_ADDR)
+        print(f"Listening: {UDP_LISTEN_ADDR[0]}:{UDP_LISTEN_ADDR[1]}")
 
         packet_count = 0
         byte_count = 0
