@@ -1,12 +1,14 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry::Vacant;
 use std::env;
 //use std::collections::hash_map::DefaultHasher;
 //use std::net::Ipv4Addr;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::classification::model::TrafficType;
 pub(crate) use crate::server::classify::{ClassifyResult, ClassifyTask};
+use crate::server::monitor::IngressMetrics;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
 use tracing::{debug, error, info, warn};
@@ -17,36 +19,34 @@ pub type ConntrackId = u32;
 /// Represents a packet firewall mark.
 type FwMark = u32;
 
+///
 const DEFAULT_MARK: FwMark = 0x801;
-const SESSION_IMAGE_SIDE: usize = 28;
-const SESSION_IMAGE_BYTES: usize = SESSION_IMAGE_SIDE * SESSION_IMAGE_SIDE;
+const FLOW_CLASSIFY_BYTES: usize = 28 * 28;
 const MIN_PACKETS_FOR_CLASSIFY: usize = 5;
-const STALE_FLOW_PRUNE: Duration = Duration::from_secs(30);
+///
+const FLOW_PRUNE_INTERVAL: Duration = Duration::from_secs(30);
+/// Represents how often metrics should be pushed.
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
+///
 #[derive(Clone, Copy, Debug)]
 enum RouteMode {
-    /// Do not set packet marks. This is useful to prove classification itself is not breaking traffic.
-    Observe,
-    /// Forward every packet in a flow through the default route from the first packet onward.
-    StableDefault,
-    /// Apply the predicted class mark after inference. This can break NATed TCP flows.
-    Classified,
+    ///
+    None,
+    ///
+    Blocking,
+    ///
+    NonBlocking,
 }
 
 impl RouteMode {
     fn from_env() -> Self {
         match env::var("PFS_ROUTE_MODE") {
-            Ok(value) if value.eq_ignore_ascii_case("observe") => Self::Observe,
-            Ok(value) if value.eq_ignore_ascii_case("stable") => Self::StableDefault,
-            Ok(value) if value.eq_ignore_ascii_case("stable-default") => Self::StableDefault,
-            Ok(value) if value.eq_ignore_ascii_case("stable_default") => Self::StableDefault,
-            Ok(value) if value.eq_ignore_ascii_case("classified") => Self::Classified,
-            Ok(value) => {
-                warn!("Unknown PFS_ROUTE_MODE={value:?}; using stable-default");
-                Self::StableDefault
-            }
-            Err(_) => Self::StableDefault,
+            Ok(value) if value.eq_ignore_ascii_case("none") => Self::None,
+            Ok(value) if value.eq_ignore_ascii_case("blocking") => Self::Blocking,
+            Ok(value) if value.eq_ignore_ascii_case("nonblocking") => Self::NonBlocking,
+            Ok(value) if value.eq_ignore_ascii_case("non-blocking") => Self::NonBlocking,
+            Ok(_) | Err(_) => Self::NonBlocking,
         }
     }
 }
@@ -65,10 +65,17 @@ enum ClassifyStatus {
 
 /// Mutable state held for each observed conntrack flow.
 struct FlowState {
+    /// The accumulated bytes of an observed flow.
     sample: Vec<u8>,
     packets_seen: usize,
     status: ClassifyStatus,
     last_seen: Instant,
+}
+
+///
+enum ForwardingAction {
+    Accept { mark: Option<FwMark> },
+    // Block,
 }
 
 /// Act as the ingress loop for packets entering the forwarding pipeline.
@@ -78,31 +85,38 @@ struct FlowState {
 /// * `nfqueue`: Netfilter queue to receive packets.
 /// * `task_tx`: Channel used to enqueue classification work for worker threads.
 /// * `result_rx`: Channel used to receive completed classification results.
-#[allow(clippy::cast_precision_loss)]
+/// * `metrics_tx`: Channel
 pub fn ingress_loop(
     nfqueue: &mut Queue,
     task_tx: &Sender<ClassifyTask>,
     result_rx: &Receiver<ClassifyResult>,
+    metrics_tx: &Sender<IngressMetrics>,
 ) {
     let route_mode = RouteMode::from_env();
-    info!("Using {route_mode:?} route mode.");
-
     let mut flow_map: HashMap<ConntrackId, FlowState> = HashMap::new();
-    let mut packet_count = 0usize;
-    let mut byte_count = 0usize;
+    let mut packet_total = 0usize;
+    let mut byte_total = 0usize;
     let mut packet_interval = 0usize;
     let mut byte_interval = 0usize;
-    let mut last_log_interval = Instant::now();
+    let mut unoptimised_packet_total = 0usize;
+    let mut unoptimised_packet_interval = 0usize;
+    let mut unoptimised_byte_total = 0usize;
+    let mut unoptimised_byte_interval = 0usize;
+
+    let mut last_metric_push = Instant::now();
     let mut last_pruned = Instant::now();
-    let mut inefficient_count = 0usize;
-    let mut inefficient_interval = 0usize;
+
+    info!("Route mode = {route_mode:?} (set with PFS_ROUTE_MODE)");
+    info!("Metrics polling interval = {LOG_INTERVAL:?}");
 
     loop {
         // Rx classify results.
         consume_results(result_rx, &mut flow_map);
 
         // Rx packet.
-        let mut msg = nfqueue.recv().unwrap();
+        let mut msg = nfqueue
+            .recv()
+            .expect("Failed to receive packet from Netfilter queue.");
         let packet = msg.get_payload();
         let payload_len = packet.len();
         let conntrack = msg
@@ -120,72 +134,63 @@ pub fn ingress_loop(
                     msg.set_nfmark(mark);
                 }
                 msg.set_verdict(Verdict::Accept);
-            }
-        }
-        nfqueue.verdict(msg).unwrap();
-
-        // Metrics.
-        packet_count += 1;
-        packet_interval += 1;
-        byte_count += payload_len;
-        byte_interval += payload_len;
-        if status == ClassifyStatus::Classifying {
-            inefficient_count += 1;
-            inefficient_interval += 1;
+                nfqueue.verdict(msg).expect("Failed to forward message.");
+            } // ForwardingAction::Block => {
+              //     panic!("Not implemented!");
+              // }
         }
 
         // Prune old connections.
-        if last_pruned.elapsed() > STALE_FLOW_PRUNE {
-            let old_conns = flow_map.len();
-            flow_map.retain(|_, flow_state| flow_state.last_seen.elapsed() < STALE_FLOW_PRUNE);
-            let new_conns = flow_map.len();
-            if old_conns != new_conns {
-                info!("Pruned connections: {:} -> {}", old_conns, new_conns);
-            }
+        if last_pruned.elapsed() > FLOW_PRUNE_INTERVAL {
+            flow_map.retain(|_, flow_state| flow_state.last_seen.elapsed() < FLOW_PRUNE_INTERVAL);
             last_pruned = Instant::now();
         }
 
-        // Log throughput.
-        if last_log_interval.elapsed() > LOG_INTERVAL {
-            let time_delay = last_log_interval.elapsed().as_secs_f64();
-            info!(
-                "Total: {} packets @ {:.2} Gb, Missed: {}",
-                packet_count,
-                (byte_count as f64 * 8.0) / 1_000_000_000.0,
-                inefficient_count
-            );
-            info!(
-                "Current: {:.2}p/s @ {:.2}Mb/s, Missed {:.2}% @ {:.2}p/s",
-                packet_interval as f64 / time_delay,
-                (byte_interval as f64 / time_delay) * 8.0 / 1_000_000.0,
-                inefficient_interval as f64 / packet_interval as f64 * 100.0,
-                inefficient_interval as f64 / time_delay,
-            );
+        // Accumulate metrics.
+        packet_total += 1;
+        packet_interval += 1;
+        byte_total += payload_len;
+        byte_interval += payload_len;
+        if status == ClassifyStatus::Classifying {
+            // Packets that make it here are being forwarded before they can be classified.
+            unoptimised_packet_total += 1;
+            unoptimised_packet_interval += 1;
+            unoptimised_byte_total += payload_len;
+            unoptimised_byte_interval += payload_len;
+        }
 
+        // Push metrics.
+        if last_metric_push.elapsed() > LOG_INTERVAL {
+            match metrics_tx.try_send(IngressMetrics {
+                timestamp: SystemTime::now(),
+                flow_count: flow_map.len(),
+                classify_backpressure: task_tx.len(),
+                packet_total,
+                byte_total,
+                packet_interval,
+                byte_interval,
+                unoptimised_packet_total,
+                unoptimised_byte_total,
+                unoptimised_packet_interval,
+                unoptimised_byte_interval,
+            }) {
+                Ok(()) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    panic!("Failed to send ingress metrics. Channel disconnected.");
+                }
+                Err(TrySendError::Full(_)) => {
+                    // Unexpected, drop metrics.
+                    error!("Failed to send ingress metrics. Channel full.");
+                }
+            }
+
+            // Reset metrics interval.
             packet_interval = 0;
             byte_interval = 0;
-            inefficient_interval = 0;
-            last_log_interval = Instant::now();
+            unoptimised_packet_interval = 0;
+            unoptimised_byte_interval = 0;
+            last_metric_push = Instant::now();
         }
-    }
-}
-
-enum ForwardingAction {
-    Accept { mark: Option<FwMark> },
-}
-
-fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> ForwardingAction {
-    match route_mode {
-        RouteMode::Observe => ForwardingAction::Accept { mark: None },
-        RouteMode::StableDefault => ForwardingAction::Accept {
-            mark: Some(DEFAULT_MARK),
-        },
-        RouteMode::Classified => match status {
-            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
-                ForwardingAction::Accept { mark: None }
-            }
-            ClassifyStatus::Pinned(mark) => ForwardingAction::Accept { mark: Some(*mark) },
-        },
     }
 }
 
@@ -219,8 +224,7 @@ fn consume_results(
             }
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => {
-                error!("Failed to receive classify result. Channel disconnected.");
-                break;
+                panic!("Failed to receive classify result. Channel disconnected.")
             }
         }
     }
@@ -248,42 +252,47 @@ fn handle_classification(
     conntrack: ConntrackId,
     sample_bytes: &[u8],
 ) -> ClassifyStatus {
-    if !flow_map.contains_key(&conntrack) {
-        flow_map.insert(
-            conntrack,
-            FlowState {
-                sample: Vec::with_capacity(SESSION_IMAGE_BYTES),
-                packets_seen: 0,
-                status: ClassifyStatus::Collecting,
-                last_seen: Instant::now(),
-            },
-        );
-        debug!("New conntrack={:#010X?}", conntrack);
+    if let Vacant(e) = flow_map.entry(conntrack) {
+        e.insert(FlowState {
+            sample: Vec::with_capacity(FLOW_CLASSIFY_BYTES),
+            packets_seen: 0,
+            status: ClassifyStatus::Collecting,
+            last_seen: Instant::now(),
+        });
+        debug!("New conntrack={:#010X}", conntrack);
     }
 
     let flow_state = flow_map
         .get_mut(&conntrack)
-        .expect("flow state should exist after insert");
+        .expect("Flow should exist after insert.");
 
     flow_state.last_seen = Instant::now();
     if flow_state.status != ClassifyStatus::Collecting {
         return flow_state.status.clone();
     }
 
+    // Accumulate bytes.
     flow_state.packets_seen += 1;
-    append_sample_bytes(&mut flow_state.sample, &sample_bytes);
+    flow_state.sample.extend_from_slice(
+        &sample_bytes[..sample_bytes
+            .len()
+            .min(FLOW_CLASSIFY_BYTES.saturating_sub(sample_bytes.len()))],
+    );
 
     // Tx classify task if ready.
-    if ready_for_classify(flow_state) {
+    if flow_state.sample.len() >= FLOW_CLASSIFY_BYTES
+        || (flow_state.packets_seen >= MIN_PACKETS_FOR_CLASSIFY && !flow_state.sample.is_empty())
+    {
         match task_tx.try_send(ClassifyTask {
             id: conntrack,
             sample: flow_state.sample.clone(),
         }) {
             Ok(()) => {}
             Err(TrySendError::Disconnected(_)) => {
-                error!("Failed to send classify job. Channel disconnected.");
+                panic!("Failed to send classify job. Channel disconnected.");
             }
             Err(TrySendError::Full(_)) => {
+                // Not a completely unexpected occurrence.
                 warn!("Failed to send classify job. Channel full.");
             }
         }
@@ -293,15 +302,30 @@ fn handle_classification(
     flow_state.status.clone()
 }
 
-fn ready_for_classify(flow_state: &FlowState) -> bool {
-    flow_state.sample.len() >= SESSION_IMAGE_BYTES
-        || (flow_state.packets_seen >= MIN_PACKETS_FOR_CLASSIFY && !flow_state.sample.is_empty())
-}
-
-fn append_sample_bytes(sample: &mut Vec<u8>, bytes: &[u8]) {
-    let available = SESSION_IMAGE_BYTES.saturating_sub(sample.len());
-    let copied_len = bytes.len().min(available);
-    sample.extend_from_slice(&bytes[..copied_len]);
+/// Determine
+///
+/// # Arguments
+///
+/// * `status`:
+/// * `route_mode`:
+///
+/// # Returns
+///
+/// The
+fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> ForwardingAction {
+    match route_mode {
+        RouteMode::None => ForwardingAction::Accept { mark: None },
+        RouteMode::Blocking => {
+            // Accumulate packets to be released upon classification.
+            panic!("Not implemented.");
+        }
+        RouteMode::NonBlocking => match status {
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
+                ForwardingAction::Accept { mark: None }
+            }
+            ClassifyStatus::Pinned(mark) => ForwardingAction::Accept { mark: Some(*mark) },
+        },
+    }
 }
 
 /// Map a predicted traffic class to the firewall mark used by forwarding.
@@ -313,13 +337,11 @@ fn append_sample_bytes(sample: &mut Vec<u8>, bytes: &[u8]) {
 /// # Returns
 ///
 /// The `nfmark` value that should be applied to packets from that flow.
-fn mark_for_traffic_type(traffic_type: TrafficType) -> u32 {
+fn mark_for_traffic_type(traffic_type: TrafficType) -> FwMark {
     match traffic_type {
-        TrafficType::GoogleMeet => 0x802,
-        TrafficType::Instagram => 0x801,
-        TrafficType::TikTok => 0x803,
+        TrafficType::GoogleMeet | TrafficType::Youtube => 0x801,
+        TrafficType::Instagram | TrafficType::TikTok => 0x802,
         TrafficType::Twitter => 0x803,
-        TrafficType::Youtube => 0x801,
     }
 }
 
