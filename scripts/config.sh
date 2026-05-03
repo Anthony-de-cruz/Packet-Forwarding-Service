@@ -23,7 +23,7 @@ HOST_LAN_IFACE="enp0s13f0u4" # YOUR LAN INTERFACE HERE.
 # Next-hop nodes for hardware forwarding.
 NODE_HOP_1="192.168.0.50" # RPI-0 ADDRESS HERE.
 NODE_HOP_2="192.168.0.51" # RPI-1 ADDRESS HERE.
-NODE_HOP_3="192.168.0.52" # RPI-2 ADDRESS HERE.
+NODE_HOP_3="192.168.0.51" # RPI-2 ADDRESS HERE.
 
 # Interface used by forwarding nodes to reach the host and upstream network.
 NODE_LAN_IFACE="eth0"
