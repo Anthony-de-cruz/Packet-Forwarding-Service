@@ -2,8 +2,6 @@ use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::Vacant;
 use std::env;
-//use std::collections::hash_map::DefaultHasher;
-//use std::net::Ipv4Addr;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::classification::model::TrafficType;
@@ -19,23 +17,24 @@ pub type ConntrackId = u32;
 /// Represents a packet firewall mark.
 type FwMark = u32;
 
-///
+/// Represents
 const DEFAULT_MARK: FwMark = 0x801;
 const FLOW_CLASSIFY_BYTES: usize = 28 * 28;
 const MIN_PACKETS_FOR_CLASSIFY: usize = 5;
-///
+/// Represents How often stale flows should be removed/unclassified.
 const FLOW_PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 /// Represents how often metrics should be pushed.
 const LOG_INTERVAL: Duration = Duration::from_secs(1);
 
-///
+/// Represents how the system should handle packets.
 #[derive(Clone, Copy, Debug)]
 enum RouteMode {
-    ///
+    /// Accept all packets.
     None,
-    ///
+    /// Block traffic for classification, then direct.
     Blocking,
-    ///
+    /// Accept traffic before classification, then redirect.
+    /// Changes in NAT mid-flow can break connection based protocols.
     NonBlocking,
 }
 
@@ -133,6 +132,9 @@ pub fn ingress_loop(
                 if let Some(mark) = mark {
                     msg.set_nfmark(mark);
                 }
+                else {
+                    msg.set_nfmark(0x801);
+                }
                 msg.set_verdict(Verdict::Accept);
                 nfqueue.verdict(msg).expect("Failed to forward message.");
             } // ForwardingAction::Block => {
@@ -161,8 +163,10 @@ pub fn ingress_loop(
 
         // Push metrics.
         if last_metric_push.elapsed() > LOG_INTERVAL {
+            let metrics_interval = last_metric_push.elapsed();
             match metrics_tx.try_send(IngressMetrics {
                 timestamp: SystemTime::now(),
+                interval: metrics_interval,
                 flow_count: flow_map.len(),
                 classify_backpressure: task_tx.len(),
                 packet_total,
@@ -273,11 +277,11 @@ fn handle_classification(
 
     // Accumulate bytes.
     flow_state.packets_seen += 1;
-    flow_state.sample.extend_from_slice(
-        &sample_bytes[..sample_bytes
-            .len()
-            .min(FLOW_CLASSIFY_BYTES.saturating_sub(sample_bytes.len()))],
-    );
+    let available = FLOW_CLASSIFY_BYTES.saturating_sub(flow_state.sample.len());
+    let copied_len = sample_bytes.len().min(available);
+    flow_state
+        .sample
+        .extend_from_slice(&sample_bytes[..copied_len]);
 
     // Tx classify task if ready.
     if flow_state.sample.len() >= FLOW_CLASSIFY_BYTES

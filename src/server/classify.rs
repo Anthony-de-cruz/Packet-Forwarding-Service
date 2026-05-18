@@ -1,8 +1,10 @@
 use crate::classification::model::{Classifier, TrafficType};
 use crate::server::monitor::ClassifyMetrics;
 use crate::server::route::ConntrackId;
-use crossbeam_channel::{Receiver, Sender};
-use tracing::debug;
+use crossbeam_channel::{Receiver, Sender, TrySendError};
+use std::thread;
+use std::time::SystemTime;
+use tracing::{debug, error};
 
 /// Classification work item sent from ingress to a worker thread.
 pub struct ClassifyTask {
@@ -48,11 +50,25 @@ pub fn classify_loop(
                 error.to_string().into()
             });
 
-        if let Ok(classification) = &classification {
-            // match metrics_tx.try_send(ClassifyMetrics {
-            //
-            // }) {
-            debug!("Classified 0x{:#010X} -> {}", task.id, classification);
+        if let Ok(traffic_type) = &classification {
+            let current_thread = thread::current();
+            let thread_name = current_thread.name().unwrap_or("classifier").to_owned();
+            match metrics_tx.try_send(ClassifyMetrics {
+                timestamp: SystemTime::now(),
+                thread_name,
+                conntrack_id: task.id,
+                traffic_type: *traffic_type,
+            }) {
+                Ok(()) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    panic!("Failed to send classify metrics. Channel disconnected.");
+                }
+                Err(TrySendError::Full(_)) => {
+                    // Unexpected, drop metrics.
+                    error!("Failed to send classify metrics. Channel full.");
+                }
+            }
+            debug!("Classified 0x{:#010X} -> {}", task.id, traffic_type);
         }
 
         // Tx result. (Blocking to avoid dropping results, though it is unexpected.)

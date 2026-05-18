@@ -11,9 +11,9 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::time::UtcTime;
 
 use crate::classification::model::Classifier;
-use crate::server::route::ingress_loop;
 use crate::server::classify::{ClassifyResult, ClassifyTask, classify_loop};
-use crate::server::monitor::{monitor_loop, ClassifyMetrics, IngressMetrics};
+use crate::server::monitor::{ClassifyMetrics, IngressMetrics, monitor_loop};
+use crate::server::route::ingress_loop;
 
 /// Path to model.
 const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
@@ -21,13 +21,6 @@ const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
 const NF_QUEUE_NUM: u16 = 10;
 /// Size of cross-thread channels.
 const CHANNEL_SIZE: usize = 1024;
-
-fn open_classifier() -> Result<Classifier, Box<dyn std::error::Error>> {
-    info!("Loading traffic classifier from {MODEL_PATH}...");
-    let classifier = Classifier::from_file(MODEL_PATH)?;
-    info!("Traffic classifier ready.");
-    Ok(classifier)
-}
 
 fn open_nfqueue() -> std::io::Result<Queue> {
     info!("Opening Netfilter queue {NF_QUEUE_NUM}...");
@@ -44,22 +37,27 @@ fn start_classify_workers(
     result_tx: &Sender<ClassifyResult>,
     metrics_tx: &Sender<ClassifyMetrics>,
 ) {
+    info!("Loading traffic classifier from {MODEL_PATH}...");
+
     for worker_id in 0..worker_count {
         let rx = task_rx.clone();
         let result_tx = result_tx.clone();
         let metrics_tx = metrics_tx.clone();
-        let mut classifier = open_classifier().unwrap();
+        let mut classifier = Classifier::from_file(MODEL_PATH).unwrap();
 
         thread::Builder::new()
             .name(format!("classifier-{worker_id}"))
-            .spawn(move || classify_loop(&mut classifier, &rx, &result_tx, &metrics_tx))
+            .spawn(move || {
+                info!("ready.");
+                classify_loop(&mut classifier, &rx, &result_tx, &metrics_tx);
+            })
             .expect("Failed to spawn thread.");
     }
 }
 
 fn start_monitor_worker(
     ingress_metrics_rx: &Receiver<IngressMetrics>,
-    classify_metrics_rx: &Receiver<ClassifyMetrics>
+    classify_metrics_rx: &Receiver<ClassifyMetrics>,
 ) {
     let ingress = ingress_metrics_rx.clone();
     let classify = classify_metrics_rx.clone();
@@ -89,8 +87,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ingress_metrics_tx, ingress_metrics_rx) = bounded::<IngressMetrics>(CHANNEL_SIZE);
     let (classify_metrics_tx, classify_metrics_rx) = bounded::<ClassifyMetrics>(CHANNEL_SIZE);
 
-    start_classify_workers(3, &task_rx, &result_tx, &classify_metrics_tx);
+    start_classify_workers(5, &task_rx, &result_tx, &classify_metrics_tx);
     start_monitor_worker(&ingress_metrics_rx, &classify_metrics_rx);
-    ingress_loop(&mut open_nfqueue()?, &task_tx, &result_rx, &ingress_metrics_tx);
+    ingress_loop(
+        &mut open_nfqueue()?,
+        &task_tx,
+        &result_rx,
+        &ingress_metrics_tx,
+    );
     Ok(())
 }
