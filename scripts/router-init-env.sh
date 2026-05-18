@@ -25,10 +25,13 @@ sudo sysctl -w net.ipv4.ip_forward=1
 sudo modprobe br_netfilter
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
 
-echo "[+] Routing UE pool back through Open5GS without host NAT..."
+echo "[+] Routing UE pool back through Open5GS with host NAT fallback for unmarked traffic..."
 sudo ip route replace "$VM_UE_POOL_SUBNET" via "$VM_OPEN5GS_IP" dev "$VM_BRIDGE_NAME"
+while sudo iptables -t nat -D POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -m mark --mark 0x0 -j MASQUERADE 2>/dev/null; do :; done
 while sudo iptables -t nat -D POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -j MASQUERADE 2>/dev/null; do :; done
 while sudo iptables -t nat -D POSTROUTING -s "$VM_UE_POOL_SUBNET" -j MASQUERADE 2>/dev/null; do :; done
+sudo iptables -t nat -C POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -m mark --mark 0x0 -j MASQUERADE 2>/dev/null || \
+    sudo iptables -t nat -A POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -m mark --mark 0x0 -j MASQUERADE
 sudo iptables -C FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$VM_UE_POOL_SUBNET" -j ACCEPT 2>/dev/null || \
     sudo iptables -A FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$VM_UE_POOL_SUBNET" -j ACCEPT
 sudo iptables -C FORWARD -i "$HOST_LAN_IFACE" -o "$VM_BRIDGE_NAME" -d "$VM_UE_POOL_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \

@@ -128,7 +128,8 @@ check_iptables filter FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$VM_
 check_iptables filter FORWARD -i "$HOST_LAN_IFACE" -o "$VM_BRIDGE_NAME" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 echo "[+] Checking routed UE pool path..."
-check_main_route "$VM_UE_POOL_SUBNET" "$OPEN5GS_VM_IP" "$VM_BRIDGE_NAME"
+check_main_route "$VM_UE_POOL_SUBNET" "$VM_OPEN5GS_IP" "$VM_BRIDGE_NAME"
+check_iptables nat POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -m mark --mark 0x0 -j MASQUERADE
 check_iptables_absent nat POSTROUTING -s "$VM_UE_POOL_SUBNET" -o "$HOST_LAN_IFACE" -j MASQUERADE
 check_iptables_absent nat POSTROUTING -s "$VM_UE_POOL_SUBNET" -j MASQUERADE
 check_iptables filter FORWARD -i "$VM_BRIDGE_NAME" -o "$HOST_LAN_IFACE" -s "$VM_UE_POOL_SUBNET" -j ACCEPT
