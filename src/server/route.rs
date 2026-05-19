@@ -132,9 +132,6 @@ pub fn ingress_loop(
                 if let Some(mark) = mark {
                     msg.set_nfmark(mark);
                 }
-                else {
-                    msg.set_nfmark(0x801);
-                }
                 msg.set_verdict(Verdict::Accept);
                 nfqueue.verdict(msg).expect("Failed to forward message.");
             } // ForwardingAction::Block => {
@@ -325,7 +322,7 @@ fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> Forwardi
         }
         RouteMode::NonBlocking => match status {
             ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
-                ForwardingAction::Accept { mark: None }
+                ForwardingAction::Accept { mark: Some(0x801) }
             }
             ClassifyStatus::Pinned(mark) => ForwardingAction::Accept { mark: Some(*mark) },
         },
