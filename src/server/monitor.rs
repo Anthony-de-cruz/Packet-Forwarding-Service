@@ -4,8 +4,12 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::{BufWriter, Write};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::info;
+
+const LOOP_SLEEP: Duration = Duration::from_millis(10);
+const PRINT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Represents metrics to be collected from the ingress thread.
 pub struct IngressMetrics {
@@ -38,10 +42,6 @@ pub struct ClassifyMetrics {
 }
 
 ///
-const LOOP_SLEEP: Duration = Duration::from_millis(10);
-const PRINT_INTERVAL: Duration = Duration::from_secs(1);
-
-///
 ///
 /// # Arguments
 ///
@@ -53,19 +53,15 @@ pub fn monitor_loop(
     classify_rx: &Receiver<ClassifyMetrics>,
 ) {
     create_dir_all("./out").expect("Failed to create ./out");
-    let ingress_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("out/ingress.log")
-        .expect("Failed to open out/ingress.log");
-    let mut ingress_writer = BufWriter::new(ingress_log);
+    let mut ingress_writer = open_csv_writer(
+        "out/ingress.csv",
+        "timestamp_utc,timestamp_unix_ms,interval_secs,flow_count,classify_backpressure,packet_total,byte_total,packet_interval,byte_interval,unoptimised_packet_total,unoptimised_byte_total,unoptimised_packet_interval,unoptimised_byte_interval",
+    );
 
-    let classify_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("out/classify.log")
-        .expect("Failed to open out/classify.log");
-    let mut classify_writer = BufWriter::new(classify_log);
+    let mut classify_writer = open_csv_writer(
+        "out/classify.csv",
+        "timestamp_utc,timestamp_unix_ms,thread_name,conntrack_id,traffic_type",
+    );
 
     // The above writers should write to disk infrequently.
 
@@ -82,6 +78,12 @@ pub fn monitor_loop(
             if let Some(m) = &last_ingress_metrics {
                 log_ingress_summary(m);
             }
+            ingress_writer
+                .flush()
+                .expect("Failed to flush ingress metrics to disk.");
+            classify_writer
+                .flush()
+                .expect("Failed to flush classify metrics to disk.");
             last_print = Instant::now();
         }
 
@@ -105,8 +107,9 @@ fn consume_ingress_metrics(
             Ok(m) => {
                 writeln!(
                     writer,
-                    "{:?}|{:.6}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-                    m.timestamp,
+                    "{},{},{:.6},{},{},{},{},{},{},{},{},{},{}",
+                    OffsetDateTime::from(m.timestamp).format(&Rfc3339).unwrap(),
+                    m.timestamp.duration_since(UNIX_EPOCH).unwrap().as_millis(),
                     m.interval.as_secs_f64(),
                     m.flow_count,
                     m.classify_backpressure,
@@ -138,8 +141,12 @@ fn consume_classify_metrics(writer: &mut BufWriter<File>, classify_rx: &Receiver
             Ok(m) => {
                 writeln!(
                     writer,
-                    "{:?}|{}|{}|{}",
-                    m.timestamp, m.thread_name, m.conntrack_id, m.traffic_type,
+                    "{},{},{},{},{}",
+                    OffsetDateTime::from(m.timestamp).format(&Rfc3339).unwrap(),
+                    m.timestamp.duration_since(UNIX_EPOCH).unwrap().as_millis(),
+                    m.thread_name,
+                    m.conntrack_id,
+                    m.traffic_type,
                 )
                 .expect("Failed to write classify metrics to disk.");
                 //info!("{} | {} -> {}", m.thread_name);
@@ -181,4 +188,30 @@ fn log_ingress_summary(m: &IngressMetrics) {
         m.packet_total,
         (m.byte_total as f64 * 8.0) / 1_000_000_000.0,
     );
+}
+
+///
+///
+/// # Arguments
+///
+/// * `path`:
+/// * `header`:
+fn open_csv_writer(path: &str, header: &str) -> BufWriter<File> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap_or_else(|_| panic!("Failed to open {path}"));
+
+    let is_empty = file
+        .metadata()
+        .unwrap_or_else(|_| panic!("Failed to inspect {path}"))
+        .len()
+        == 0;
+    let mut writer = BufWriter::new(file);
+    if is_empty {
+        writeln!(writer, "{header}").unwrap_or_else(|_| panic!("Failed to write header to {path}"));
+    }
+
+    writer
 }
