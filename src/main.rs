@@ -17,6 +17,8 @@ use crate::server::route::ingress_loop;
 
 /// Path to model.
 const MODEL_PATH: &str = "Packet-Classifier/out/model.onnx";
+/// The number of classify threads to be spawned.
+const CLASSIFY_THREAD_COUNT: usize = 5;
 /// Netfilter queue number.
 const NF_QUEUE_NUM: u16 = 10;
 /// Size of cross-thread channels.
@@ -87,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ingress_metrics_tx, ingress_metrics_rx) = bounded::<IngressMetrics>(CHANNEL_SIZE);
     let (classify_metrics_tx, classify_metrics_rx) = bounded::<ClassifyMetrics>(CHANNEL_SIZE);
 
-    start_classify_workers(5, &task_rx, &result_tx, &classify_metrics_tx);
+    start_classify_workers(CLASSIFY_THREAD_COUNT, &task_rx, &result_tx, &classify_metrics_tx);
     start_monitor_worker(&ingress_metrics_rx, &classify_metrics_rx);
     ingress_loop(
         &mut open_nfqueue()?,

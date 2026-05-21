@@ -1,10 +1,12 @@
+use std::thread;
+use std::time::SystemTime;
+
+use crossbeam_channel::{Receiver, Sender, TrySendError};
+use tracing::{debug, error};
+
 use crate::classification::model::{Classifier, TrafficType};
 use crate::server::monitor::ClassifyMetrics;
 use crate::server::route::ConntrackId;
-use crossbeam_channel::{Receiver, Sender, TrySendError};
-use std::thread;
-use std::time::SystemTime;
-use tracing::{debug, error};
 
 /// Classification work item sent from ingress to a worker thread.
 pub struct ClassifyTask {
@@ -27,9 +29,9 @@ pub struct ClassifyResult {
 ///
 /// * `classifier`: Reusable ONNX-backed classifier owned by this worker.
 /// * `task_rx`: Channel that delivers byte samples grouped by conntrack flow.
-/// * `result_tx`: Channel used to report the winning traffic class, or an
-/// * `metrics_tx`: Channel
-///   inference error, back to ingress.
+/// * `result_tx`: Channel used to report the winning traffic class,
+///   or an inference error, back to ingress.
+/// * `metrics_tx`: Channel to report metrics to.
 pub fn classify_loop(
     classifier: &mut Classifier,
     task_rx: &Receiver<ClassifyTask>,

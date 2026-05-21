@@ -4,12 +4,13 @@ use std::collections::hash_map::Entry::Vacant;
 use std::env;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::classification::model::TrafficType;
-pub(crate) use crate::server::classify::{ClassifyResult, ClassifyTask};
-use crate::server::monitor::IngressMetrics;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use nfq::{Queue, Verdict};
 use tracing::{debug, error, info, warn};
+
+use crate::classification::model::TrafficType;
+pub(crate) use crate::server::classify::{ClassifyResult, ClassifyTask};
+use crate::server::monitor::IngressMetrics;
 
 /// Represents a kernel-level conntrack ID for a given flow.
 pub type ConntrackId = u32;
@@ -376,22 +377,6 @@ fn mark_for_traffic_type(traffic_type: TrafficType) -> FwMark {
 //         msg.get_nfmark(),
 //         decision.mark
 //     );
-// }
-//
-// fn print_classification(decision: &ForwardDecision) {
-//     if let Some(classification) = &decision.classification {
-//         println!(
-//             "  classification: {}, confidence={:.4}",
-//             classification.traffic_type,
-//             top_score(&classification.scores)
-//         );
-//     } else if let Some(error) = &decision.error {
-//         println!("  classification: unavailable ({error})");
-//     }
-// }
-//
-// fn top_score(scores: &[f32]) -> f32 {
-//     scores.iter().copied().fold(f32::NEG_INFINITY, f32::max)
 // }
 //
 // fn payload_hash(payload: &[u8]) -> u64 {

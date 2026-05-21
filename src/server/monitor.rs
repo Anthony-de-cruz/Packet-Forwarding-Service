@@ -1,12 +1,14 @@
-use crate::classification::model::TrafficType;
-use crate::server::route::ConntrackId;
-use crossbeam_channel::{Receiver, TryRecvError};
 use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::{BufWriter, Write};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crossbeam_channel::{Receiver, TryRecvError};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::info;
+
+use crate::classification::model::TrafficType;
+use crate::server::route::ConntrackId;
 
 const LOOP_SLEEP: Duration = Duration::from_millis(10);
 const PRINT_INTERVAL: Duration = Duration::from_secs(1);
@@ -41,12 +43,12 @@ pub struct ClassifyMetrics {
     pub(crate) traffic_type: TrafficType,
 }
 
-///
+/// Infinite loop to receive metrics and write to disk periodically.
 ///
 /// # Arguments
 ///
-/// * `ingress_rx`:
-/// * `classify_rx`:
+/// * `ingress_rx`: Channel to receive ingress metrics.
+/// * `classify_rx`: Channel to receive classify metrics.
 #[allow(clippy::cast_precision_loss)]
 pub fn monitor_loop(
     ingress_rx: &Receiver<IngressMetrics>,
@@ -87,16 +89,21 @@ pub fn monitor_loop(
             last_print = Instant::now();
         }
 
+        // Don't eat the CPU.
         thread::sleep(LOOP_SLEEP);
     }
-    // ingress_writer
-    //     .flush()
-    //     .expect("Failed to write ingress metrics to disk.");
-    // classify_writer
-    //     .flush()
-    //     .expect("Failed to write classify metrics to disk.");
 }
 
+/// Try and receive the next set of ingress metrics. Non-blocking.
+///
+/// # Arguments
+///
+/// * `writer`: Place to write metric logs.
+/// * `ingress_rx`: Channel to receive metrics from.
+///
+/// # Returns
+///
+/// The next set of ingress metrics.
 fn consume_ingress_metrics(
     writer: &mut BufWriter<File>,
     ingress_rx: &Receiver<IngressMetrics>,
@@ -135,6 +142,16 @@ fn consume_ingress_metrics(
     }
 }
 
+/// Try and receive the next set of classify metrics. Non-blocking.
+///
+/// # Arguments
+///
+/// * `writer`: Place to write metric logs.
+/// * `ingress_rx`: Channel to receive metrics from.
+///
+/// # Returns
+///
+/// The next set of classify metrics.
 fn consume_classify_metrics(writer: &mut BufWriter<File>, classify_rx: &Receiver<ClassifyMetrics>) {
     loop {
         match classify_rx.try_recv() {
@@ -161,6 +178,11 @@ fn consume_classify_metrics(writer: &mut BufWriter<File>, classify_rx: &Receiver
     }
 }
 
+/// Log a summary of the given ingress metrics.
+///
+/// # Arguments
+///
+/// * `m`: Metrics to summarize.
 #[allow(clippy::cast_precision_loss)]
 fn log_ingress_summary(m: &IngressMetrics) {
     let interval_secs = m.interval.as_secs_f64();
@@ -190,12 +212,16 @@ fn log_ingress_summary(m: &IngressMetrics) {
     );
 }
 
-///
+/// Create new log file to write to.
 ///
 /// # Arguments
 ///
-/// * `path`:
-/// * `header`:
+/// * `path`: The file path to create/open.
+/// * `header`: The file header for new files.
+///
+/// # Returns
+///
+/// The new file.
 fn open_csv_writer(path: &str, header: &str) -> BufWriter<File> {
     let file = OpenOptions::new()
         .create(true)
