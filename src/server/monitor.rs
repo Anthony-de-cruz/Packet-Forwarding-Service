@@ -12,6 +12,7 @@ use crate::server::route::ConntrackId;
 
 const LOOP_SLEEP: Duration = Duration::from_millis(10);
 const PRINT_INTERVAL: Duration = Duration::from_secs(1);
+const CLOCK_TICKS_PER_SECOND: f64 = 100.0;
 
 /// Represents metrics to be collected from the ingress thread.
 pub struct IngressMetrics {
@@ -65,10 +66,17 @@ pub fn monitor_loop(
         "timestamp_utc,timestamp_unix_ms,thread_name,conntrack_id,traffic_type",
     );
 
+    let mut perf_writer = open_csv_writer(
+        "out/performance.csv",
+        "timestamp_utc,timestamp_unix_ms,cpu_percent,vmrss_bytes",
+    );
+
     // The above writers should write to disk infrequently.
 
     let mut last_ingress_metrics: Option<IngressMetrics> = None;
     let mut last_print = Instant::now();
+    let mut last_process_cpu_ticks = None;
+    let mut last_process_sample = None;
 
     loop {
         if let Some(metrics) = consume_ingress_metrics(&mut ingress_writer, ingress_rx) {
@@ -77,6 +85,13 @@ pub fn monitor_loop(
         consume_classify_metrics(&mut classify_writer, classify_rx);
 
         if last_print.elapsed() > PRINT_INTERVAL {
+            // Calculate process metrics periodically.
+            process_metrics(
+                &mut perf_writer,
+                &mut last_process_cpu_ticks,
+                &mut last_process_sample,
+            );
+            // Log ingress metrics periodically.
             if let Some(m) = &last_ingress_metrics {
                 log_ingress_summary(m);
             }
@@ -86,6 +101,9 @@ pub fn monitor_loop(
             classify_writer
                 .flush()
                 .expect("Failed to flush classify metrics to disk.");
+            perf_writer
+                .flush()
+                .expect("Failed to flush performance metrics to disk.");
             last_print = Instant::now();
         }
 
@@ -166,7 +184,6 @@ fn consume_classify_metrics(writer: &mut BufWriter<File>, classify_rx: &Receiver
                     m.traffic_type,
                 )
                 .expect("Failed to write classify metrics to disk.");
-                //info!("{} | {} -> {}", m.thread_name);
             }
             Err(TryRecvError::Disconnected) => {
                 panic!("Failed to receive classify metrics. Channel disconnected.");
@@ -240,4 +257,77 @@ fn open_csv_writer(path: &str, header: &str) -> BufWriter<File> {
     }
 
     writer
+}
+
+///
+///
+/// # Arguments
+///
+/// * `writer`: The file path to create/open.
+/// * `last_cpu_ticks`: The file header for new files.
+/// * `last_sample`: The file header for new files.
+///
+/// # Returns
+///
+/// CPU utilization, VmRSS bytes.
+#[allow(clippy::cast_precision_loss)]
+fn process_metrics(
+    writer: &mut BufWriter<File>,
+    last_cpu_ticks: &mut Option<u64>,
+    last_sample: &mut Option<Instant>,
+) -> (f64, u64) {
+    let now = Instant::now();
+    let cpu_ticks = read_process_cpu_ticks().expect("Failed to read /proc/self/stat.");
+    let rss_bytes = read_process_rss_bytes().expect("Failed to read /proc/self/status.");
+
+    let cpu_percent = match (*last_cpu_ticks, *last_sample) {
+        (Some(previous_ticks), Some(previous_sample)) => {
+            let elapsed = now.duration_since(previous_sample).as_secs_f64();
+            if elapsed > 0.0 {
+                let cpu_seconds =
+                    cpu_ticks.saturating_sub(previous_ticks) as f64 / CLOCK_TICKS_PER_SECOND;
+                cpu_seconds / elapsed * 100.0
+            } else {
+                0.0
+            }
+        }
+        _ => 0.0,
+    };
+
+    let timestamp = SystemTime::now();
+    writeln!(
+        writer,
+        "{},{},{:.2},{}",
+        OffsetDateTime::from(timestamp).format(&Rfc3339).unwrap(),
+        timestamp.duration_since(UNIX_EPOCH).unwrap().as_millis(),
+        cpu_percent,
+        rss_bytes
+    )
+    .expect("Failed to write performance metrics to disk.");
+
+    *last_cpu_ticks = Some(cpu_ticks);
+    *last_sample = Some(now);
+
+    (cpu_percent, rss_bytes)
+}
+
+fn read_process_cpu_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let fields: Vec<&str> = stat.rsplit_once(") ")?.1.split_whitespace().collect();
+    let user_ticks = fields.get(11)?.parse::<u64>().ok()?;
+    let system_ticks = fields.get(12)?.parse::<u64>().ok()?;
+
+    Some(user_ticks.saturating_add(system_ticks))
+}
+
+fn read_process_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(value) = line.strip_prefix("VmRSS:") {
+            let kb = value.split_whitespace().next()?.parse::<u64>().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+    }
+
+    None
 }
