@@ -151,12 +151,15 @@ pub fn ingress_loop(
         packet_interval += 1;
         byte_total += payload_len;
         byte_interval += payload_len;
-        if status == ClassifyStatus::Classifying {
-            // Packets that make it here are being forwarded before they can be classified.
-            unoptimised_packet_total += 1;
-            unoptimised_packet_interval += 1;
-            unoptimised_byte_total += payload_len;
-            unoptimised_byte_interval += payload_len;
+        match status {
+            ClassifyStatus::Collecting | ClassifyStatus::Classifying => {
+                // Packets that make it here are being forwarded before they can be classified.
+                unoptimised_packet_total += 1;
+                unoptimised_packet_interval += 1;
+                unoptimised_byte_total += payload_len;
+                unoptimised_byte_interval += payload_len;
+            }
+            ClassifyStatus::Pinned(_) => { }
         }
 
         // Push metrics.
