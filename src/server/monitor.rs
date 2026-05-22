@@ -1,10 +1,10 @@
-use std::fs::{File, OpenOptions, create_dir_all};
+use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{Receiver, TryRecvError};
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tracing::info;
 
 use crate::classification::model::TrafficType;
@@ -68,7 +68,7 @@ pub fn monitor_loop(
 
     let mut perf_writer = open_csv_writer(
         "out/performance.csv",
-        "timestamp_utc,timestamp_unix_ms,cpu_percent,vmrss_bytes",
+        "timestamp_utc,timestamp_unix_ms,cpu_percent,rss_bytes",
     );
 
     // The above writers should write to disk infrequently.
