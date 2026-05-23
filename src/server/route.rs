@@ -159,7 +159,7 @@ pub fn ingress_loop(
                 unoptimised_byte_total += payload_len;
                 unoptimised_byte_interval += payload_len;
             }
-            ClassifyStatus::Pinned(_) => { }
+            ClassifyStatus::Pinned(_) => {}
         }
 
         // Push metrics.
@@ -344,9 +344,8 @@ fn forwarding_action(status: &ClassifyStatus, route_mode: RouteMode) -> Forwardi
 /// The `nfmark` value that should be applied to packets from that flow.
 fn mark_for_traffic_type(traffic_type: TrafficType) -> FwMark {
     match traffic_type {
-        TrafficType::GoogleMeet | TrafficType::Youtube => 0x801,
-        TrafficType::Instagram | TrafficType::TikTok => 0x802,
-        TrafficType::Twitter => 0x803,
+        TrafficType::TikTok | TrafficType::Youtube => 0x801,
+        TrafficType::Instagram | TrafficType::GoogleMeet | TrafficType::Twitter => 0x802,
     }
 }
 
