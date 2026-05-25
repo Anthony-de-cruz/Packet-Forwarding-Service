@@ -1,5 +1,21 @@
 # Packet Forwarding Service
 
+## Overview
+
+This repository contains the following materials:
+
+- **[src](src/):** The rust source code for the packet forwarding service
+
+- **[scripts](scripts/):** A series of bash scripts to setup the project environment.
+
+- **[packet-classifier](Packet-Classifier/README.md):** The scripts to preprocess packet captures, train and evaluate a CNN for packet flow classification.
+
+- **[packet-flow](Packet-Flow/README.md):** The scripts to test the system with traffic and plot metrics.
+
+## Data
+
+Data is not provided directly in the repository due to the large file sizes for multi-media traffic captures.
+
 ## Dependencies
 
 The router is dependent on:
@@ -41,6 +57,7 @@ The next level would be to set up an `iperf3` server/client to simulate a heavy 
 
 > [!IMPORTANT]
 > Read the scripts found in `scripts/` understand what is going on before you run anything.
+> They may require environment specific tweaks.
 
 To set up VMs:
 
