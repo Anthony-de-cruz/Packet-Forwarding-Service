@@ -1,5 +1,7 @@
 # Packet Forwarding Service
 
+Clone recursively using the `--recursive` arg to get the required submodules.
+
 ## Overview
 
 This repository contains the following materials:
