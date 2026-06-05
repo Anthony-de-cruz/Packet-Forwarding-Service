@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import TextIO
 
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "out"
+OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 
 UDP_LISTEN_ADDR = "0.0.0.0", 9000
 

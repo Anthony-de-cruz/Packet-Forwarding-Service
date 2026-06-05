@@ -3,8 +3,11 @@
 import csv
 from collections import defaultdict
 from datetime import UTC, datetime
+from pathlib import Path
 
-from utils import OUT_DIR, load_csv
+from utils import load_csv
+
+OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 
 INGRESS_CSV = OUT_DIR / "ingress.csv"
 CLASSIFY_CSV = OUT_DIR / "classify.csv"
