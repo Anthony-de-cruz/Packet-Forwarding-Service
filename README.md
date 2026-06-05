@@ -1,6 +1,6 @@
 # Packet Forwarding Service
 
-Clone recursively using the `--recursive` arg to get the required submodules.
+Clone recursively using the `--recursive` arg to get the required submodules. Alternatively, use `git submodule init && git submodule update` after cloning.
 
 ## Overview
 

@@ -1,6 +1,3 @@
 [submodule "Packet-Classifier"]
 	path = Packet-Classifier
 	url = git@github.com:Anthony-de-cruz/Packet-Classifier.git
-[submodule "Packet-Flow"]
-	path = Packet-Flow
-	url = git@github.com:Anthony-de-cruz/Packet-Flow.git
