@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 
 import socket
+import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from utils import UDP_LISTEN_ADDR, open_csv_writer, utc_timestamp
+TEST_ENV_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(TEST_ENV_DIR))
+
+from utils import OUT_DIR, UDP_LISTEN_ADDR, open_csv_writer, utc_timestamp
 
 
 RECV_SIZE = 2048
 LOG_INTERVAL_SECONDS = 1.0
-LOG_PATH = Path("../out/udp-echo-server.csv")
+LOG_PATH = OUT_DIR / "udp-echo-server.csv"
 
 NODE_NAMES = {
     # "10.45.0.2": "ue1",

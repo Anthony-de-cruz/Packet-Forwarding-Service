@@ -8,11 +8,11 @@ This repository contains the following materials:
 
 - **[src](src/):** The rust source code for the packet forwarding service
 
-- **[scripts](scripts/):** A series of bash scripts to setup the project environment.
+- **[scripts/setup-env](scripts/setup-env/):** Bash scripts to set up the project environment.
 
 - **[packet-classifier](Packet-Classifier/README.md):** The scripts to preprocess packet captures, train and evaluate a CNN for packet flow classification.
 
-- **[packet-flow](Packet-Flow/README.md):** The scripts to test the system with traffic and plot metrics.
+- **[scripts/test-env](scripts/test-env/):** The scripts to test the system with traffic and plot metrics.
 
 ## Data
 
@@ -58,7 +58,7 @@ The next level would be to set up an `iperf3` server/client to simulate a heavy 
 ## Setup
 
 > [!IMPORTANT]
-> Read the scripts found in `scripts/` understand what is going on before you run anything.
+> Read the scripts found in `scripts/setup-env/` and `scripts/test-env/` understand what is going on before you run anything.
 > They may require environment specific tweaks.
 
 To set up VMs:
@@ -69,8 +69,7 @@ To set up VMs:
 Then run:
 
 ```sh
-cd ./scripts
-./vm-init-env.sh # You need to be in the scripts dir.
+./scripts/setup-env/vm-init-env.sh
 ```
 
 Once completed, go into the VMs and setup Open5GS and UERANSIM as normal.
@@ -78,26 +77,26 @@ Once completed, go into the VMs and setup Open5GS and UERANSIM as normal.
 In the Open5GS VM, follow the [quickstart guide](https://open5gs.org/open5gs/docs/guide/01-quickstart/). Then run:
 
 ```sh
-./scripts/vm-open5gs-init-env.sh 
-./scripts/vm-open5gs-restart.sh 
+./scripts/setup-env/vm-open5gs-init-env.sh
+./scripts/setup-env/vm-open5gs-restart.sh
 ```
 
 In the UERANSIM VM, follow the [installation guide](https://github.com/aligungr/UERANSIM/wiki/Installation). Then run:
 
 ```sh
-./scripts/vm-ueransim-init-env.sh
+./scripts/setup-env/vm-ueransim-init-env.sh
 ```
 
 To set up server host:
 
 ```sh
-./scripts/router-init-env.sh
+./scripts/setup-env/router-init-env.sh
 ```
 
 On the forwarding nodes:
 
 ```sh
-./scripts/node-init-env.sh
+./scripts/setup-env/node-init-env.sh
 ```
 
 To build/run the router with `sudo -E cargo run` to maintain dynamic library link.
@@ -106,7 +105,7 @@ To build/run the router with `sudo -E cargo run` to maintain dynamic library lin
 Once you are set up, try running:
 
 ```sh
-./scripts/check-env.sh
+./scripts/setup-env/check-env.sh
 ```
 
 This system has a lot of moving parts so it is helpful in case anything breaks.

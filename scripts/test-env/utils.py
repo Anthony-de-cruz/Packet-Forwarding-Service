@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import TextIO
 
 
-OUT_DIR = Path(__file__).resolve().parent.parent / "out"
+TEST_ENV_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TEST_ENV_DIR.parent.parent
+OUT_DIR = TEST_ENV_DIR / "out"
 
 UDP_LISTEN_ADDR = "0.0.0.0", 9000
 

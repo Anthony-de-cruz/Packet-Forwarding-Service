@@ -6,7 +6,8 @@
 set -euo pipefail
 
 # Grab config values.
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
 
 echo "[-] Removing VM bridge NAT and forwarding rules..."
 while sudo iptables -t nat -D POSTROUTING -s "$VM_BRIDGE_SUBNET" -o "$HOST_LAN_IFACE" -j MASQUERADE 2>/dev/null; do :; done

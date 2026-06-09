@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 
 import os
+import sys
+from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+
+TEST_ENV_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(TEST_ENV_DIR))
 
 import matplotlib
 

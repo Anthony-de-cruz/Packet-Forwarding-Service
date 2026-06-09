@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 import csv
+import sys
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from utils import load_csv
+TEST_ENV_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(TEST_ENV_DIR))
 
-OUT_DIR = Path(__file__).resolve().parent.parent / "out"
+from utils import OUT_DIR, load_csv
 
 INGRESS_CSV = OUT_DIR / "ingress.csv"
 CLASSIFY_CSV = OUT_DIR / "classify.csv"

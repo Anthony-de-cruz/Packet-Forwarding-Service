@@ -6,10 +6,12 @@
 set -euo pipefail
 
 # Grab config values.
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+cd "$SCRIPT_DIR"
 
 # Run reset script with absolute path.
-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/vm-reset-env.sh"
+"$SCRIPT_DIR/vm-reset-env.sh"
 
 # Download the Ubuntu ISO if it does not exist already,
 # then copy to the correct directory.

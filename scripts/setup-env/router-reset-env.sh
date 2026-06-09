@@ -6,7 +6,8 @@
 set -euo pipefail
 
 # Grab config values.
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
 
 
 # Flush project routing policy.

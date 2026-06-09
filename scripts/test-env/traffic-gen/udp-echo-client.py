@@ -2,31 +2,36 @@
 
 import random
 import socket
+import sys
 import time
 from pathlib import Path
 
 from PIL import Image
 
-from utils import open_csv_writer, utc_timestamp
+TEST_ENV_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(TEST_ENV_DIR))
+
+from utils import OUT_DIR, REPO_ROOT, open_csv_writer, utc_timestamp
 
 
 UDP_BIND_INTERFACE = "uesimtun0"
 UDP_DEST_ADDR = "192.168.0.52", 9000
 # UDP_DEST_ADDR = "127.0.0.1", 9000
 
+SAMPLE_DATA_DIR = REPO_ROOT / "Packet-Classifier" / "data" / "test"
 SAMPLE_TYPE_DIR_PATHS = [
-    "../Packet-Classifier/data/test/google-meet",
-    "../Packet-Classifier/data/test/instagram",
-    "../Packet-Classifier/data/test/tiktok",
-    "../Packet-Classifier/data/test/twitter",
-    "../Packet-Classifier/data/test/youtube",
+    SAMPLE_DATA_DIR / "google-meet",
+    SAMPLE_DATA_DIR / "instagram",
+    SAMPLE_DATA_DIR / "tiktok",
+    SAMPLE_DATA_DIR / "twitter",
+    SAMPLE_DATA_DIR / "youtube",
 ]
 CHUNK_SIZE = 1200
 DELAY_SECONDS = 0.01
 ECHO_TIMEOUT_SECONDS = 2.0
 LOG_INTERVAL_SECONDS = 1.0
 SAMPLE_SIZE = (28, 28)
-LOG_PATH = Path("../out/udp-echo-client-latency.csv")
+LOG_PATH = OUT_DIR / "udp-echo-client-latency.csv"
 
 CSV_COLUMNS = [
     "timestamp_utc",
@@ -46,14 +51,14 @@ def write_log(writer, avg_latency_ms: float) -> None:
     )
 
 
-def extract_samples(sample_type_dirs: list[str]) -> list[list[bytes]]:
+def extract_samples(sample_type_dirs: list[Path]) -> list[list[bytes]]:
     # Find all samples.
     sample_set_paths: list[list[str]] = []
-    for dir in sample_type_dirs:
+    for sample_type_dir in sample_type_dirs:
         sample_set_paths.append(
             sorted(
                 str(child)
-                for child in Path(dir).iterdir()
+                for child in sample_type_dir.iterdir()
                 if child.is_file() and child.suffix == ".png"
             )[:50]
         )
